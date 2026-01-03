@@ -56,6 +56,9 @@ impl WindowManager {
         let mut connection = Connection::new()?;
         let tree = connection.get_tree()?;
 
+        // Find the currently focused window ID
+        let focused_id = self.find_focused_window(&tree);
+
         // Save the current MRU order
         let old_windows = std::mem::take(&mut self.windows);
 
@@ -67,20 +70,28 @@ impl WindowManager {
             self.windows.iter().map(|w| w.id).collect();
 
         // Rebuild the list preserving MRU order:
-        // 1. Keep existing windows in their MRU order
-        // 2. Add new windows at the end
+        // 1. Put the focused window first (if any)
+        // 2. Keep existing windows in their MRU order
+        // 3. Add new windows at the end
         let mut new_windows = Vec::new();
 
-        // First, add windows that existed before, in their MRU order
+        // First, add the focused window if it exists
+        if let Some(fid) = focused_id {
+            if let Some(focused_win) = self.windows.iter().find(|w| w.id == fid).cloned() {
+                new_windows.push(focused_win);
+            }
+        }
+
+        // Then, add windows that existed before, in their MRU order (skip focused window if already added)
         for old_win in old_windows {
-            if current_ids.contains(&old_win.id) {
-                // Window still exists, keep it in MRU order
+            if current_ids.contains(&old_win.id) && !new_windows.iter().any(|w| w.id == old_win.id) {
+                // Window still exists and not already added, keep it in MRU order
                 new_windows.push(old_win);
             }
             // Windows that no longer exist are dropped
         }
 
-        // Then add any new windows that weren't in the old list
+        // Finally add any new windows that weren't in the old list (skip focused window if already added)
         for new_win in self.windows.drain(..) {
             if !new_windows.iter().any(|w| w.id == new_win.id) {
                 new_windows.push(new_win);
@@ -88,7 +99,7 @@ impl WindowManager {
         }
 
         self.windows = new_windows;
-        debug!("Refreshed to {} windows (preserved MRU order)", self.windows.len());
+        debug!("Refreshed to {} windows (preserved MRU order, focused: {:?})", self.windows.len(), focused_id);
 
         // Get current workspace
         if let Ok(workspaces) = connection.get_workspaces() {

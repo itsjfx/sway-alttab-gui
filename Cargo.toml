@@ -17,3 +17,4 @@ tracing-subscriber = "0.3"
 gtk4 = { version = "0.7", features = ["v4_10"] }
 glib = "0.18"
 freedesktop-desktop-entry = "0.5"
+libc = "0.2"

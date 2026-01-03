@@ -48,16 +48,12 @@ impl KeyboardMonitor {
     }
 
     /// Start monitoring keyboard events and send them through the channel
-    pub async fn monitor(mut self, tx: mpsc::UnboundedSender<KeyEvent>) -> Result<()> {
+    /// This runs in a blocking thread and communicates via the channel
+    pub fn monitor_blocking(mut self, tx: mpsc::UnboundedSender<KeyEvent>) -> Result<()> {
         info!("Starting keyboard monitoring");
 
         loop {
-            // Fetch events (blocking call, but runs in separate task)
-            let events = tokio::task::block_in_place(|| {
-                self.device.fetch_events()
-            });
-
-            match events {
+            match self.device.fetch_events() {
                 Ok(events) => {
                     for event in events {
                         if let InputEventKind::Key(key) = event.kind() {
@@ -74,7 +70,7 @@ impl KeyboardMonitor {
                                 debug!("Key event: {:?}", ke);
                                 if tx.send(ke).is_err() {
                                     warn!("Failed to send key event, receiver dropped");
-                                    break;
+                                    return Ok(());
                                 }
                             }
                         }
@@ -83,15 +79,13 @@ impl KeyboardMonitor {
                 Err(e) => {
                     if e.kind() == std::io::ErrorKind::WouldBlock {
                         // No events available, sleep briefly
-                        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                        std::thread::sleep(std::time::Duration::from_millis(10));
                     } else {
                         return Err(e.into());
                     }
                 }
             }
         }
-
-        Ok(())
     }
 }
 

@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::keyboard_monitor::KeyEvent;
+use crate::ui_commands::{UiCommand, UiResponse};
 use crate::window_manager::WindowManager;
 use anyhow::Result;
 use futures_lite::stream::StreamExt;
@@ -26,10 +27,11 @@ pub struct Daemon {
     alt_pressed: bool,
     current_index: usize,
     current_windows: Vec<crate::window_manager::WindowInfo>,
+    ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
 }
 
 impl Daemon {
-    pub fn new(config: Config) -> Result<Self> {
+    pub fn new(config: Config, ui_tx: Option<mpsc::UnboundedSender<UiCommand>>) -> Result<Self> {
         let window_manager = WindowManager::new()?;
 
         Ok(Daemon {
@@ -40,6 +42,7 @@ impl Daemon {
             alt_pressed: false,
             current_index: 0,
             current_windows: Vec::new(),
+            ui_tx,
         })
     }
 
@@ -65,18 +68,21 @@ impl Daemon {
         loop {
             tokio::select! {
                 Some(key_event) = key_rx.recv() => {
+                    debug!("Received key event: {:?}", key_event);
                     self.handle_key_event(key_event)?;
                 }
                 Some(window_event) = window_rx.recv() => {
+                    debug!("Received window event: {:?}", window_event);
                     self.handle_window_event(window_event)?;
                 }
                 else => {
-                    info!("All channels closed, shutting down");
+                    error!("All channels closed, shutting down");
                     break;
                 }
             }
         }
 
+        error!("Daemon event loop exited");
         sway_events.abort();
         Ok(())
     }
@@ -161,8 +167,23 @@ impl Daemon {
         // Start at index 1 (next window), or 0 if only one window
         self.current_index = if self.current_windows.len() > 1 { 1 } else { 0 };
 
-        // Print to stderr
+        // Print to stderr (keep console output)
         self.print_switcher();
+
+        // Show UI if available
+        if let Some(ref ui_tx) = self.ui_tx {
+            info!("Sending UiCommand::Show to UI");
+            if let Err(e) = ui_tx.send(UiCommand::Show {
+                windows: self.current_windows.clone(),
+                initial_index: self.current_index,
+            }) {
+                error!("Failed to send UI command: {:?}", e);
+            } else {
+                info!("UI command sent successfully");
+            }
+        } else {
+            info!("No UI channel available");
+        }
 
         Ok(())
     }
@@ -184,7 +205,18 @@ impl Daemon {
             }
         }
 
+        // Print to stderr (keep console output)
         self.print_switcher();
+
+        // Update UI if available
+        if let Some(ref ui_tx) = self.ui_tx {
+            let command = if forward {
+                UiCommand::CycleNext
+            } else {
+                UiCommand::CyclePrev
+            };
+            let _ = ui_tx.send(command);
+        }
 
         Ok(())
     }
@@ -210,6 +242,11 @@ impl Daemon {
 
             // Update MRU order immediately (don't wait for Sway event)
             self.window_manager.on_focus(window_id);
+        }
+
+        // Hide UI if available
+        if let Some(ref ui_tx) = self.ui_tx {
+            let _ = ui_tx.send(UiCommand::Hide);
         }
 
         // Return to idle state

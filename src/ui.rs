@@ -1,15 +1,10 @@
 use crate::icon_resolver::IconResolver;
 use crate::window_manager::WindowInfo;
-use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, Image, Label, Orientation,
-    Widget, WindowPosition,
+    Widget,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::debug;
 
 const ICON_SIZE: i32 = 64;
@@ -34,11 +29,7 @@ impl SwitcherWindow {
             .default_height(150)
             .decorated(false)
             .resizable(false)
-            .modal(true)
             .build();
-
-        // Center window on screen
-        window.set_position(WindowPosition::Center);
 
         // Create horizontal container for window tiles
         let container = GtkBox::new(Orientation::Horizontal, TILE_PADDING);
@@ -62,8 +53,12 @@ impl SwitcherWindow {
 
     /// Show the window switcher with a list of windows
     pub fn show(&mut self, windows: Vec<WindowInfo>, initial_index: usize) {
+        use tracing::info;
+
         self.windows = windows;
         self.current_index = initial_index.min(self.windows.len().saturating_sub(1));
+
+        info!("Building UI for {} windows", self.windows.len());
 
         // Clear existing tiles
         while let Some(child) = self.container.first_child() {
@@ -87,7 +82,10 @@ impl SwitcherWindow {
             self.tiles.push(tile);
         }
 
+        info!("Presenting window...");
+        self.window.set_visible(true);
         self.window.present();
+        info!("Window presented, is_visible={}", self.window.is_visible());
     }
 
     fn create_window_tile(&self, window: &WindowInfo, icon_resolver: &mut IconResolver) -> Widget {
@@ -185,7 +183,9 @@ impl SwitcherWindow {
 
     /// Close the window switcher
     pub fn close(&self) {
-        self.window.close();
+        use tracing::info;
+        info!("Hiding window (not closing, so GTK app stays alive)");
+        self.window.set_visible(false);
     }
 
     /// Check if window is visible
@@ -205,7 +205,8 @@ fn truncate_string(s: &str, max_len: usize) -> String {
 /// Setup CSS styling for the window switcher
 pub fn setup_css() {
     let provider = gtk4::CssProvider::new();
-    provider.load_from_string(
+    // In GTK4, use load_from_data instead of load_from_string
+    provider.load_from_data(
         r#"
         window {
             background-color: rgba(30, 30, 30, 0.95);

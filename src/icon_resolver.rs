@@ -1,5 +1,6 @@
-use freedesktop_desktop_entry::{DesktopEntry, Iter};
+use freedesktop_desktop_entry::DesktopEntry;
 use gtk4::gdk_pixbuf::Pixbuf;
+use gtk4::gio::prelude::FileExt;
 use gtk4::IconLookupFlags;
 use gtk4::IconTheme;
 use std::collections::HashMap;
@@ -89,7 +90,8 @@ impl IconResolver {
     /// Parse desktop file and extract Icon field
     fn parse_desktop_file(&self, path: &PathBuf) -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
-        let entry = DesktopEntry::decode(path, &bytes).ok()?;
+        let content = String::from_utf8(bytes).ok()?;
+        let entry = DesktopEntry::decode(path, &content).ok()?;
 
         entry.icon().map(|s| s.to_string())
     }
@@ -108,9 +110,10 @@ impl IconResolver {
 
         // Try to get the file and load as pixbuf
         if let Some(file) = paintable.file() {
-            if let Some(path) = file.path() {
+            // In GTK4, get path from URI
+            if let Some(path_str) = file.path() {
                 if let Ok(pixbuf) = Pixbuf::from_file_at_scale(
-                    path,
+                    &path_str,
                     self.icon_size,
                     self.icon_size,
                     true,

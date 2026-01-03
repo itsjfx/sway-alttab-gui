@@ -8,6 +8,7 @@ pub struct WindowInfo {
     pub app_id: Option<String>,
     pub title: String,
     pub workspace: String,
+    pub window_class: Option<String>, // WM_CLASS for X11 windows
 }
 
 impl WindowInfo {
@@ -15,11 +16,16 @@ impl WindowInfo {
         // Only include actual windows (views), not containers
         // Windows have a pid, containers don't
         if node.node_type == NodeType::Con && node.pid.is_some() {
+            // Extract WM_CLASS from X11/XWayland window properties
+            let window_class = node.window_properties.as_ref()
+                .and_then(|props| props.class.clone());
+
             Some(WindowInfo {
                 id: node.id,
                 app_id: node.app_id.clone(),
                 title: node.name.clone().unwrap_or_default(),
                 workspace,
+                window_class,
             })
         } else {
             None

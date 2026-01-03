@@ -93,21 +93,33 @@ impl SwitcherWindow {
         vbox.set_margin_start(TILE_PADDING);
         vbox.set_margin_end(TILE_PADDING);
 
-        // Add icon
-        let icon = if let Some(pixbuf) = icon_resolver.resolve_icon(window.app_id.as_deref()) {
-            Image::from_pixbuf(Some(&pixbuf))
+        // Add icon - try app_id first, then window_class as fallback
+        let icon_found = if let Some(pixbuf) = icon_resolver.resolve_icon(window.app_id.as_deref()) {
+            let icon = Image::from_pixbuf(Some(&pixbuf));
+            icon.set_pixel_size(ICON_SIZE);
+            vbox.append(&icon);
+            true
+        } else if let Some(pixbuf) = icon_resolver.resolve_icon(window.window_class.as_deref()) {
+            let icon = Image::from_pixbuf(Some(&pixbuf));
+            icon.set_pixel_size(ICON_SIZE);
+            vbox.append(&icon);
+            true
         } else if let Some(fallback) = icon_resolver.get_fallback_icon() {
-            Image::from_pixbuf(Some(&fallback))
+            let icon = Image::from_pixbuf(Some(&fallback));
+            icon.set_pixel_size(ICON_SIZE);
+            vbox.append(&icon);
+            true
         } else {
-            // Absolute fallback: just a label
-            let label = Label::new(Some("□"));
-            label.set_width_request(ICON_SIZE);
-            label.set_height_request(ICON_SIZE);
-            return vbox.upcast();
+            false
         };
 
-        icon.set_pixel_size(ICON_SIZE);
-        vbox.append(&icon);
+        if !icon_found {
+            // Absolute fallback: just a placeholder label
+            let placeholder = Label::new(Some("□"));
+            placeholder.set_width_request(ICON_SIZE);
+            placeholder.set_height_request(ICON_SIZE);
+            vbox.append(&placeholder);
+        }
 
         // Add title
         let title = truncate_string(&window.title, MAX_TITLE_LENGTH);

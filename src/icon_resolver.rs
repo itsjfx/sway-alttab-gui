@@ -83,7 +83,27 @@ impl IconResolver {
             }
         }
 
-        warn!("No desktop file found for app_id: {}", app_id);
+        // Try common variations: remove spaces, convert to lowercase
+        let variations = vec![
+            app_id.replace(" ", "").to_lowercase(),
+            app_id.replace(" ", "-").to_lowercase(),
+            app_id.split_whitespace().next().unwrap_or("").to_lowercase(),
+        ];
+
+        for variation in variations {
+            if variation.is_empty() {
+                continue;
+            }
+            for dir in &search_dirs {
+                let desktop_file = dir.join(format!("{}.desktop", variation));
+                if let Some(icon) = self.parse_desktop_file(&desktop_file) {
+                    debug!("Found icon '{}' for app_id '{}' using variation '{}' in {:?}", icon, app_id, variation, desktop_file);
+                    return Some(icon);
+                }
+            }
+        }
+
+        debug!("No desktop file found for app_id: {}", app_id);
         None
     }
 

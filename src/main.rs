@@ -147,10 +147,9 @@ fn main() -> Result<()> {
 
         // Create channels for UI communication
         let (ui_cmd_tx, ui_cmd_rx) = mpsc::unbounded_channel();
-        let (ui_resp_tx, _ui_resp_rx) = mpsc::unbounded_channel();
 
         // Setup UI command handler
-        ui_handler::handle_ui_commands(switcher.clone(), ui_cmd_rx, ui_resp_tx);
+        ui_handler::handle_ui_commands(switcher.clone(), ui_cmd_rx);
 
         // Spawn Tokio runtime in a background thread
         let config_clone = config.clone();

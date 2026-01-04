@@ -1,15 +1,14 @@
 use crate::ui::SwitcherWindow;
-use crate::ui_commands::{UiCommand, UiResponse};
+use crate::ui_commands::UiCommand;
 use std::cell::RefCell;
 use std::rc::Rc;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 /// Handles UI commands and dispatches them to the SwitcherWindow
 pub fn handle_ui_commands(
     switcher: Rc<RefCell<SwitcherWindow>>,
     mut ui_rx: mpsc::UnboundedReceiver<UiCommand>,
-    _ui_response_tx: mpsc::UnboundedSender<UiResponse>,
 ) {
     info!("UI command handler started");
 

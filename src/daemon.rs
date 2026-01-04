@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::keyboard_monitor::KeyEvent;
-use crate::ui_commands::{UiCommand, UiResponse};
+use crate::ui_commands::UiCommand;
 use crate::window_manager::WindowManager;
 use anyhow::Result;
 use futures_lite::stream::StreamExt;

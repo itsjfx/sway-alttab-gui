@@ -15,16 +15,3 @@ pub enum UiCommand {
     /// Hide the window switcher
     Hide,
 }
-
-/// Responses sent from UI back to daemon
-#[derive(Debug, Clone)]
-pub enum UiResponse {
-    /// UI was shown successfully
-    Shown,
-    /// UI cycled to a new window
-    Cycled { new_index: usize },
-    /// UI was dismissed (window closed or hidden)
-    Dismissed {
-        selected_window: Option<WindowInfo>,
-    },
-}

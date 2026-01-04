@@ -188,21 +188,11 @@ impl SwitcherWindow {
         debug!("Cycled to window {}: {:?}", self.current_index, self.windows[self.current_index].title);
     }
 
-    /// Get the currently selected window
-    pub fn get_selected_window(&self) -> Option<&WindowInfo> {
-        self.windows.get(self.current_index)
-    }
-
     /// Close the window switcher
     pub fn close(&self) {
         use tracing::info;
         info!("Hiding window (not closing, so GTK app stays alive)");
         self.window.set_visible(false);
-    }
-
-    /// Check if window is visible
-    pub fn is_visible(&self) -> bool {
-        self.window.is_visible()
     }
 }
 

@@ -164,16 +164,6 @@ impl WindowManager {
         }
     }
 
-    /// Remove window from list
-    pub fn on_window_close(&mut self, window_id: i64) {
-        self.windows.retain(|w| w.id != window_id);
-    }
-
-    /// Add new window to list
-    pub fn on_window_open(&mut self, window: WindowInfo) {
-        self.windows.insert(0, window);
-    }
-
     /// Get filtered windows based on workspace mode
     pub fn get_filtered_windows(&self, mode: WorkspaceMode) -> Vec<WindowInfo> {
         match mode {
@@ -197,10 +187,5 @@ impl WindowManager {
         let mut connection = Connection::new()?;
         connection.run_command(format!("[con_id={}] focus", window_id))?;
         Ok(())
-    }
-
-    /// Get current workspace name
-    pub fn get_current_workspace(&self) -> Option<&str> {
-        self.current_workspace.as_deref()
     }
 }

@@ -32,7 +32,7 @@ impl KeyboardMonitor {
         let devices = evdev::enumerate();
 
         // Look for a device that supports the keys we need
-        for (_, mut device) in devices {
+        for (_, device) in devices {
             if let Some(keys) = device.supported_keys() {
                 // Check if device supports Alt, Shift, and Tab
                 if keys.contains(Key::KEY_LEFTALT)

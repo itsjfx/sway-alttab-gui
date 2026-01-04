@@ -119,11 +119,38 @@ impl IconResolver {
         self.try_wmclass_index_lookup(app_id)
             .or_else(|| self.try_exact_desktop_match(app_id))
             .or_else(|| self.try_case_insensitive_match(app_id))
+            .or_else(|| self.try_reverse_domain_match(app_id))
             .or_else(|| self.try_common_variations(app_id))
             .or_else(|| {
                 debug!("No desktop file found for app_id: {}", app_id);
                 None
             })
+    }
+
+    /// Try to match reverse-domain app_ids like "org.speedcrunch.speedcrunch"
+    /// by extracting the last segment and looking for that desktop file
+    fn try_reverse_domain_match(&self, app_id: &str) -> Option<String> {
+        // Only try if app_id contains dots (reverse-domain style)
+        if !app_id.contains('.') {
+            return None;
+        }
+
+        // Try the last segment (e.g., "speedcrunch" from "org.speedcrunch.speedcrunch")
+        if let Some(last_segment) = app_id.rsplit('.').next() {
+            let last_segment_lower = last_segment.to_lowercase();
+            for dir in &get_application_dirs() {
+                let desktop_file = dir.join(format!("{}.desktop", last_segment_lower));
+                if let Some(icon) = self.parse_desktop_file(&desktop_file) {
+                    debug!(
+                        "Found icon '{}' for app_id '{}' via reverse-domain last segment '{}' in {:?}",
+                        icon, app_id, last_segment_lower, desktop_file
+                    );
+                    return Some(icon);
+                }
+            }
+        }
+
+        None
     }
 
     /// Try to find icon via the pre-built WMClass index
@@ -248,6 +275,18 @@ impl IconResolver {
             return Some(pixbuf);
         }
 
+        // Try /usr/share/pixmaps as fallback (many apps install icons here)
+        let pixmaps_path = format!("/usr/share/pixmaps/{}.png", icon_name);
+        if let Ok(pixbuf) = Pixbuf::from_file_at_scale(
+            &pixmaps_path,
+            self.icon_size,
+            self.icon_size,
+            true,
+        ) {
+            debug!("Found icon in pixmaps: {}", pixmaps_path);
+            return Some(pixbuf);
+        }
+
         warn!("Failed to load icon: {}", icon_name);
         None
     }
@@ -354,6 +393,84 @@ Exec=signal-desktop
         println!("Found {} WMClass entries:", index.len());
         for (key, path) in index.iter().take(10) {
             println!("  '{}' -> {:?}", key, path);
+        }
+    }
+
+    #[test]
+    fn test_pixmaps_fallback_path_format() {
+        // Test that the pixmaps path is correctly formatted
+        let icon_name = "speedcrunch";
+        let expected_path = "/usr/share/pixmaps/speedcrunch.png";
+        let actual_path = format!("/usr/share/pixmaps/{}.png", icon_name);
+        assert_eq!(actual_path, expected_path);
+    }
+
+    #[test]
+    fn test_reverse_domain_extracts_last_segment() {
+        // Test that reverse-domain app_ids extract the correct last segment
+        let test_cases = [
+            ("org.speedcrunch.speedcrunch", "speedcrunch"),
+            ("org.gnome.Calculator", "calculator"),
+            ("com.github.user.app", "app"),
+            ("io.elementary.code", "code"),
+        ];
+
+        for (app_id, expected) in test_cases {
+            let last_segment = app_id.rsplit('.').next().unwrap().to_lowercase();
+            assert_eq!(last_segment, expected, "Failed for app_id: {}", app_id);
+        }
+    }
+
+    #[test]
+    fn test_reverse_domain_skips_non_dotted_ids() {
+        // Non-dotted app_ids should not be processed as reverse-domain
+        let simple_ids = ["firefox", "alacritty", "code"];
+
+        for app_id in simple_ids {
+            assert!(!app_id.contains('.'), "Test data error: {} contains a dot", app_id);
+        }
+    }
+
+    /// Integration test that verifies icons in /usr/share/pixmaps can be loaded.
+    /// Run with: cargo test -- --ignored
+    #[test]
+    #[ignore]
+    fn test_pixmaps_fallback_integration() {
+        use std::path::Path;
+
+        // Find an icon that exists in pixmaps but not in icon theme
+        let pixmaps_dir = Path::new("/usr/share/pixmaps");
+        if !pixmaps_dir.exists() {
+            println!("Skipping test: /usr/share/pixmaps does not exist");
+            return;
+        }
+
+        // Look for any .png file in pixmaps
+        let test_icon = std::fs::read_dir(pixmaps_dir)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .flatten()
+                    .find(|e| e.path().extension().map(|ext| ext == "png").unwrap_or(false))
+                    .map(|e| e.path().file_stem().unwrap().to_string_lossy().to_string())
+            });
+
+        if let Some(icon_name) = test_icon {
+            println!("Testing pixmaps fallback with icon: {}", icon_name);
+
+            let wmclass_index = IconResolver::build_wmclass_index();
+            let resolver = IconResolver::with_wmclass_index(48, wmclass_index);
+
+            // The icon should be loadable via the pixmaps fallback
+            let pixbuf = resolver.load_icon_by_name(&icon_name);
+            assert!(
+                pixbuf.is_some(),
+                "Expected to load icon '{}' from /usr/share/pixmaps/{}.png",
+                icon_name,
+                icon_name
+            );
+        } else {
+            println!("Skipping test: no PNG icons found in /usr/share/pixmaps");
         }
     }
 }

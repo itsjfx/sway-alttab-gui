@@ -21,9 +21,10 @@ pub fn handle_ui_commands(
                 UiCommand::Show {
                     windows,
                     initial_index,
+                    wmclass_index,
                 } => {
                     info!("Showing UI with {} windows, index {}", windows.len(), initial_index);
-                    switcher.borrow_mut().show(windows, initial_index);
+                    switcher.borrow_mut().show(windows, initial_index, wmclass_index);
                     info!("UI shown");
                 }
                 UiCommand::CycleNext => {

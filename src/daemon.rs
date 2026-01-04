@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::icon_resolver::WmClassIndex;
 use crate::keyboard_monitor::KeyEvent;
 use crate::ui_commands::UiCommand;
 use crate::window_manager::WindowManager;
@@ -28,10 +29,15 @@ pub struct Daemon {
     current_index: usize,
     current_windows: Vec<crate::window_manager::WindowInfo>,
     ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
+    wmclass_index: WmClassIndex,
 }
 
 impl Daemon {
-    pub fn new(config: Config, ui_tx: Option<mpsc::UnboundedSender<UiCommand>>) -> Result<Self> {
+    pub fn new(
+        config: Config,
+        ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
+        wmclass_index: WmClassIndex,
+    ) -> Result<Self> {
         let window_manager = WindowManager::new()?;
 
         Ok(Daemon {
@@ -43,6 +49,7 @@ impl Daemon {
             current_index: 0,
             current_windows: Vec::new(),
             ui_tx,
+            wmclass_index,
         })
     }
 
@@ -176,6 +183,7 @@ impl Daemon {
             if let Err(e) = ui_tx.send(UiCommand::Show {
                 windows: self.current_windows.clone(),
                 initial_index: self.current_index,
+                wmclass_index: self.wmclass_index.clone(),
             }) {
                 error!("Failed to send UI command: {:?}", e);
             } else {

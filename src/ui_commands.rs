@@ -1,3 +1,4 @@
+use crate::icon_resolver::WmClassIndex;
 use crate::window_manager::WindowInfo;
 
 /// Commands sent from daemon to UI
@@ -7,6 +8,7 @@ pub enum UiCommand {
     Show {
         windows: Vec<WindowInfo>,
         initial_index: usize,
+        wmclass_index: WmClassIndex,
     },
     /// Cycle to next window
     CycleNext,

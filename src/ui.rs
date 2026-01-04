@@ -1,4 +1,4 @@
-use crate::icon_resolver::IconResolver;
+use crate::icon_resolver::{IconResolver, WmClassIndex};
 use crate::window_manager::WindowInfo;
 use gtk4::prelude::*;
 use gtk4::{
@@ -52,7 +52,7 @@ impl SwitcherWindow {
     }
 
     /// Show the window switcher with a list of windows
-    pub fn show(&mut self, windows: Vec<WindowInfo>, initial_index: usize) {
+    pub fn show(&mut self, windows: Vec<WindowInfo>, initial_index: usize, wmclass_index: WmClassIndex) {
         use tracing::info;
 
         self.windows = windows;
@@ -66,8 +66,8 @@ impl SwitcherWindow {
         }
         self.tiles.clear();
 
-        // Create icon resolver
-        let mut icon_resolver = IconResolver::new(ICON_SIZE);
+        // Create icon resolver with the pre-built WMClass index
+        let mut icon_resolver = IconResolver::with_wmclass_index(ICON_SIZE, wmclass_index);
 
         // Create tiles for each window
         for (i, window) in self.windows.iter().enumerate() {

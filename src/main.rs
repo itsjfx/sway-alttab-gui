@@ -11,6 +11,7 @@ use anyhow::{Context, Result};
 use config::Config;
 use daemon::Daemon;
 use gtk4::prelude::*;
+use icon_resolver::{IconResolver, WmClassIndex};
 use keyboard_monitor::KeyboardMonitor;
 use std::cell::RefCell;
 use std::fs;
@@ -130,6 +131,10 @@ fn main() -> Result<()> {
     // Check keyboard device permissions
     keyboard_monitor::check_permissions()?;
 
+    // Build WMClass index at startup (before GTK, so it's ready when needed)
+    info!("Building WMClass index for icon resolution...");
+    let wmclass_index = IconResolver::build_wmclass_index();
+
     // Initialize GTK
     gtk4::init()?;
 
@@ -138,6 +143,7 @@ fn main() -> Result<()> {
         .application_id("com.github.sway-alttab")
         .build();
 
+    let wmclass_index_clone = wmclass_index.clone();
     app.connect_activate(move |app| {
         // Setup CSS
         ui::setup_css();
@@ -153,13 +159,14 @@ fn main() -> Result<()> {
 
         // Spawn Tokio runtime in a background thread
         let config_clone = config.clone();
+        let wmclass_index_for_daemon = wmclass_index_clone.clone();
         std::thread::spawn(move || {
             // Create Tokio runtime
             let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
             // Run daemon in Tokio runtime
             rt.block_on(async move {
-                match run_daemon(config_clone, ui_cmd_tx).await {
+                match run_daemon(config_clone, ui_cmd_tx, wmclass_index_for_daemon).await {
                     Ok(_) => {
                         info!("Daemon exited normally");
                     }
@@ -180,7 +187,11 @@ fn main() -> Result<()> {
 }
 
 /// Run the async daemon logic within the GLib event loop
-async fn run_daemon(config: Config, ui_cmd_tx: mpsc::UnboundedSender<ui_commands::UiCommand>) -> Result<()> {
+async fn run_daemon(
+    config: Config,
+    ui_cmd_tx: mpsc::UnboundedSender<ui_commands::UiCommand>,
+    wmclass_index: WmClassIndex,
+) -> Result<()> {
     // Create communication channels
     let (key_tx, key_rx) = mpsc::unbounded_channel();
 
@@ -194,8 +205,8 @@ async fn run_daemon(config: Config, ui_cmd_tx: mpsc::UnboundedSender<ui_commands
         }
     });
 
-    // Create and run daemon
-    let daemon = Daemon::new(config, Some(ui_cmd_tx))?;
+    // Create and run daemon with the WMClass index
+    let daemon = Daemon::new(config, Some(ui_cmd_tx), wmclass_index)?;
     info!("Starting daemon event loop");
     daemon.run(key_rx).await?;
 

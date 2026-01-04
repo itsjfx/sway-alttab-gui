@@ -5,7 +5,7 @@ use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, Image, Label, Orientation,
     Widget,
 };
-use tracing::debug;
+use tracing::{debug, info};
 
 const ICON_SIZE: i32 = 64;
 const WINDOW_PADDING: i32 = 20;
@@ -53,8 +53,6 @@ impl SwitcherWindow {
 
     /// Show the window switcher with a list of windows
     pub fn show(&mut self, windows: Vec<WindowInfo>, initial_index: usize, wmclass_index: WmClassIndex) {
-        use tracing::info;
-
         self.windows = windows;
         self.current_index = initial_index.min(self.windows.len().saturating_sub(1));
 
@@ -140,19 +138,27 @@ impl SwitcherWindow {
         tile.remove_css_class("selected");
     }
 
-    /// Cycle to next window
-    pub fn cycle_next(&mut self) {
+    /// Cycle through windows in the given direction
+    /// forward=true cycles to the next window, forward=false cycles to the previous
+    fn cycle(&mut self, forward: bool) {
         if self.windows.is_empty() {
             return;
         }
 
-        // Remove highlight from current
+        // Remove highlight from current tile
         if let Some(current_tile) = self.tiles.get(self.current_index) {
             self.unhighlight_tile(current_tile);
         }
 
-        // Move to next (wrap around)
-        self.current_index = (self.current_index + 1) % self.windows.len();
+        // Update index with wraparound
+        let len = self.windows.len();
+        self.current_index = if forward {
+            (self.current_index + 1) % len
+        } else if self.current_index == 0 {
+            len - 1
+        } else {
+            self.current_index - 1
+        };
 
         // Highlight new selection
         if let Some(new_tile) = self.tiles.get(self.current_index) {
@@ -160,37 +166,20 @@ impl SwitcherWindow {
         }
 
         debug!("Cycled to window {}: {:?}", self.current_index, self.windows[self.current_index].title);
+    }
+
+    /// Cycle to next window
+    pub fn cycle_next(&mut self) {
+        self.cycle(true);
     }
 
     /// Cycle to previous window
     pub fn cycle_prev(&mut self) {
-        if self.windows.is_empty() {
-            return;
-        }
-
-        // Remove highlight from current
-        if let Some(current_tile) = self.tiles.get(self.current_index) {
-            self.unhighlight_tile(current_tile);
-        }
-
-        // Move to previous (wrap around)
-        if self.current_index == 0 {
-            self.current_index = self.windows.len() - 1;
-        } else {
-            self.current_index -= 1;
-        }
-
-        // Highlight new selection
-        if let Some(new_tile) = self.tiles.get(self.current_index) {
-            self.highlight_tile(new_tile);
-        }
-
-        debug!("Cycled to window {}: {:?}", self.current_index, self.windows[self.current_index].title);
+        self.cycle(false);
     }
 
     /// Close the window switcher
     pub fn close(&self) {
-        use tracing::info;
         info!("Hiding window (not closing, so GTK app stays alive)");
         self.window.set_visible(false);
     }

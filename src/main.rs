@@ -2,10 +2,12 @@ mod config;
 mod daemon;
 mod icon_resolver;
 mod keyboard_monitor;
+mod sway_client;
 mod ui;
 mod ui_commands;
 mod ui_handler;
 mod window_manager;
+mod window_switcher;
 
 use anyhow::{Context, Result};
 use config::Config;
@@ -19,14 +21,13 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use tokio::sync::mpsc;
 use tracing::{error, info};
-use tracing_subscriber;
 use ui::SwitcherWindow;
 
 /// Get the path to the pidfile
 fn get_pidfile_path() -> Result<PathBuf> {
     // Try to use XDG_RUNTIME_DIR, fall back to ~/.cache
     let runtime_dir = dirs::runtime_dir()
-        .or_else(|| dirs::cache_dir())
+        .or_else(dirs::cache_dir)
         .context("Could not determine runtime directory")?;
 
     Ok(runtime_dir.join("sway-alttab.pid"))
@@ -55,7 +56,9 @@ fn check_pidfile() -> Result<()> {
         } else {
             // Stale pidfile, remove it
             info!("Removing stale pidfile (PID {} not found)", pid);
-            fs::remove_file(&pidfile).ok();
+            if let Err(e) = fs::remove_file(&pidfile) {
+                tracing::warn!("Failed to remove stale pidfile: {}", e);
+            }
         }
     }
 

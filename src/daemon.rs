@@ -3,17 +3,12 @@ use crate::icon_resolver::WmClassIndex;
 use crate::keyboard_monitor::KeyEvent;
 use crate::ui_commands::UiCommand;
 use crate::window_manager::WindowManager;
+use crate::window_switcher::WindowSwitcher;
 use anyhow::Result;
 use futures_lite::stream::StreamExt;
 use swayipc_async::{Connection, Event, EventType, WindowChange};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum DaemonState {
-    Idle,
-    Switching,
-}
 
 #[derive(Debug, Clone)]
 enum WindowEvent {
@@ -23,11 +18,10 @@ enum WindowEvent {
 pub struct Daemon {
     window_manager: WindowManager,
     config: Config,
-    state: DaemonState,
     shift_pressed: bool,
     alt_pressed: bool,
-    current_index: usize,
-    current_windows: Vec<crate::window_manager::WindowInfo>,
+    /// Active window switcher session, or None if idle
+    switcher: Option<WindowSwitcher>,
     ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
     wmclass_index: WmClassIndex,
 }
@@ -43,14 +37,17 @@ impl Daemon {
         Ok(Daemon {
             window_manager,
             config,
-            state: DaemonState::Idle,
             shift_pressed: false,
             alt_pressed: false,
-            current_index: 0,
-            current_windows: Vec::new(),
+            switcher: None,
             ui_tx,
             wmclass_index,
         })
+    }
+
+    /// Returns true if currently in switching mode
+    fn is_switching(&self) -> bool {
+        self.switcher.is_some()
     }
 
     /// Main event loop
@@ -94,11 +91,12 @@ impl Daemon {
         Ok(())
     }
 
-    fn handle_key_event(
-        &mut self,
-        event: KeyEvent,
-    ) -> Result<()> {
-        debug!("Key event: {:?}, State: {:?}", event, self.state);
+    fn handle_key_event(&mut self, event: KeyEvent) -> Result<()> {
+        debug!(
+            "Key event: {:?}, switching: {}",
+            event,
+            self.is_switching()
+        );
 
         match event {
             KeyEvent::AltPressed => {
@@ -106,9 +104,8 @@ impl Daemon {
             }
             KeyEvent::AltReleased => {
                 self.alt_pressed = false;
-
                 // If we're in switching mode, select the current window
-                if self.state == DaemonState::Switching {
+                if self.is_switching() {
                     self.finalize_selection()?;
                 }
             }
@@ -120,15 +117,12 @@ impl Daemon {
             }
             KeyEvent::TabPressed => {
                 if self.alt_pressed {
-                    match self.state {
-                        DaemonState::Idle => {
-                            // Start switching mode
-                            self.start_switching()?;
-                        }
-                        DaemonState::Switching => {
-                            // Cycle through windows
-                            self.cycle_windows(!self.shift_pressed)?;
-                        }
+                    if self.is_switching() {
+                        // Cycle through windows
+                        self.cycle_windows(!self.shift_pressed)?;
+                    } else {
+                        // Start switching mode
+                        self.start_switching()?;
                     }
                 }
             }
@@ -137,15 +131,12 @@ impl Daemon {
         Ok(())
     }
 
-    fn handle_window_event(
-        &mut self,
-        event: WindowEvent,
-    ) -> Result<()> {
+    fn handle_window_event(&mut self, event: WindowEvent) -> Result<()> {
         match event {
             WindowEvent::Focus(window_id) => {
                 // Only update MRU order when not in switching mode
                 // (during switching, we don't want Sway events to interfere)
-                if self.state == DaemonState::Idle {
+                if !self.is_switching() {
                     debug!("Window {} focused, updating MRU order", window_id);
                     self.window_manager.on_focus(window_id);
                 }
@@ -161,28 +152,25 @@ impl Daemon {
         self.window_manager.refresh()?;
 
         // Get filtered windows
-        self.current_windows = self.window_manager.get_filtered_windows(self.config.mode);
+        let windows = self.window_manager.get_filtered_windows(self.config.mode);
 
-        if self.current_windows.is_empty() {
+        if windows.is_empty() {
             info!("No windows to switch to");
             return Ok(());
         }
 
-        // Enter switching state
-        self.state = DaemonState::Switching;
-
-        // Start at index 1 (next window), or 0 if only one window
-        self.current_index = if self.current_windows.len() > 1 { 1 } else { 0 };
+        // Create the switcher, starting at the next window
+        let switcher = WindowSwitcher::new(windows, true);
 
         // Print to stderr (keep console output)
-        self.print_switcher();
+        Self::print_switcher_static(&switcher);
 
         // Show UI if available
         if let Some(ref ui_tx) = self.ui_tx {
             info!("Sending UiCommand::Show to UI");
             if let Err(e) = ui_tx.send(UiCommand::Show {
-                windows: self.current_windows.clone(),
-                initial_index: self.current_index,
+                windows: switcher.windows().to_vec(),
+                initial_index: switcher.current_index(),
                 wmclass_index: self.wmclass_index.clone(),
             }) {
                 error!("Failed to send UI command: {:?}", e);
@@ -193,28 +181,28 @@ impl Daemon {
             info!("No UI channel available");
         }
 
+        // Enter switching state
+        self.switcher = Some(switcher);
+
         Ok(())
     }
 
     fn cycle_windows(&mut self, forward: bool) -> Result<()> {
         debug!("Cycling windows: forward={}", forward);
 
-        if self.current_windows.is_empty() {
+        if let Some(ref mut switcher) = self.switcher {
+            if switcher.is_empty() {
+                return Ok(());
+            }
+            switcher.cycle(forward);
+        } else {
             return Ok(());
         }
 
-        if forward {
-            self.current_index = (self.current_index + 1) % self.current_windows.len();
-        } else {
-            if self.current_index == 0 {
-                self.current_index = self.current_windows.len() - 1;
-            } else {
-                self.current_index -= 1;
-            }
-        }
-
         // Print to stderr (keep console output)
-        self.print_switcher();
+        if let Some(ref switcher) = self.switcher {
+            Self::print_switcher_static(switcher);
+        }
 
         // Update UI if available
         if let Some(ref ui_tx) = self.ui_tx {
@@ -223,16 +211,22 @@ impl Daemon {
             } else {
                 UiCommand::CyclePrev
             };
-            let _ = ui_tx.send(command);
+            if let Err(e) = ui_tx.send(command) {
+                debug!("Failed to send cycle command to UI (channel closed): {}", e);
+            }
         }
 
         Ok(())
     }
 
-    fn print_switcher(&self) {
+    fn print_switcher_static(switcher: &WindowSwitcher) {
         eprintln!("\n=== Window Switcher ===");
-        for (i, window) in self.current_windows.iter().enumerate() {
-            let marker = if i == self.current_index { ">>>" } else { "   " };
+        for (i, window) in switcher.windows().iter().enumerate() {
+            let marker = if i == switcher.current_index() {
+                ">>>"
+            } else {
+                "   "
+            };
             let app_id = window.app_id.as_deref().unwrap_or("<unknown>");
             eprintln!("{} [{}] {} - {}", marker, window.id, app_id, window.title);
         }
@@ -242,8 +236,14 @@ impl Daemon {
     fn finalize_selection(&mut self) -> Result<()> {
         info!("Finalizing window selection");
 
+        // Take the switcher out, ending switching mode
+        let switcher = match self.switcher.take() {
+            Some(s) => s,
+            None => return Ok(()),
+        };
+
         // Focus the selected window
-        if let Some(window) = self.current_windows.get(self.current_index) {
+        if let Some(window) = switcher.current() {
             eprintln!("SELECTING: {} (ID: {})", window.title, window.id);
             let window_id = window.id;
             self.window_manager.focus_window(window_id)?;
@@ -254,13 +254,10 @@ impl Daemon {
 
         // Hide UI if available
         if let Some(ref ui_tx) = self.ui_tx {
-            let _ = ui_tx.send(UiCommand::Hide);
+            if let Err(e) = ui_tx.send(UiCommand::Hide) {
+                debug!("Failed to send hide command to UI (channel closed): {}", e);
+            }
         }
-
-        // Return to idle state
-        self.state = DaemonState::Idle;
-        self.current_windows.clear();
-        self.current_index = 0;
 
         Ok(())
     }
@@ -273,18 +270,18 @@ impl Daemon {
         info!("Subscribed to Sway window events");
 
         while let Some(event) = events.next().await {
-            match event? {
-                Event::Window(e) => {
-                    debug!("Sway window event: {:?} for container {:?}", e.change, e.container.id);
+            if let Event::Window(e) = event? {
+                debug!(
+                    "Sway window event: {:?} for container {:?}",
+                    e.change, e.container.id
+                );
 
-                    // Track window focus changes for MRU ordering
-                    if e.change == WindowChange::Focus {
-                        if let Err(e) = window_tx.send(WindowEvent::Focus(e.container.id)) {
-                            error!("Failed to send window focus event: {}", e);
-                        }
+                // Track window focus changes for MRU ordering
+                if e.change == WindowChange::Focus {
+                    if let Err(e) = window_tx.send(WindowEvent::Focus(e.container.id)) {
+                        error!("Failed to send window focus event: {}", e);
                     }
                 }
-                _ => {}
             }
         }
 

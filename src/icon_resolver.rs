@@ -8,6 +8,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
+/// Get standard XDG application directories plus flatpak locations.
+/// Used for both building the WMClass index and searching for desktop files.
+fn get_application_dirs() -> Vec<PathBuf> {
+    [
+        dirs::data_local_dir().map(|d| d.join("applications")),
+        Some(PathBuf::from("/usr/share/applications")),
+        Some(PathBuf::from("/usr/local/share/applications")),
+        Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
+        dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
 /// A pre-built index mapping StartupWMClass values to desktop file paths.
 /// This allows resolving icons for apps like Signal where app_id ("signal")
 /// doesn't match the desktop file name ("signal-desktop.desktop").
@@ -37,18 +52,7 @@ impl IconResolver {
     /// This scans all standard XDG application directories at startup.
     pub fn build_wmclass_index() -> WmClassIndex {
         let mut index = HashMap::new();
-
-        // Standard XDG application directories plus flatpak
-        let search_dirs: Vec<PathBuf> = [
-            dirs::data_local_dir().map(|d| d.join("applications")),
-            Some(PathBuf::from("/usr/share/applications")),
-            Some(PathBuf::from("/usr/local/share/applications")),
-            Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
-            dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
+        let search_dirs = get_application_dirs();
 
         for dir in &search_dirs {
             if !dir.exists() {
@@ -109,61 +113,74 @@ impl IconResolver {
         icon_name.and_then(|name| self.load_icon_by_name(&name))
     }
 
-    /// Find desktop file and extract icon name
+    /// Find desktop file and extract icon name using multiple search strategies
     fn find_icon_from_desktop_file(&self, app_id: &str) -> Option<String> {
-        // Check wmclass_index first (case-insensitive)
+        // Try strategies in order of likelihood
+        self.try_wmclass_index_lookup(app_id)
+            .or_else(|| self.try_exact_desktop_match(app_id))
+            .or_else(|| self.try_case_insensitive_match(app_id))
+            .or_else(|| self.try_common_variations(app_id))
+            .or_else(|| {
+                debug!("No desktop file found for app_id: {}", app_id);
+                None
+            })
+    }
+
+    /// Try to find icon via the pre-built WMClass index
+    fn try_wmclass_index_lookup(&self, app_id: &str) -> Option<String> {
         let app_id_lower = app_id.to_lowercase();
-        if let Some(desktop_path) = self.wmclass_index.get(&app_id_lower) {
-            if let Some(icon) = self.parse_desktop_file(desktop_path) {
-                debug!(
-                    "Found icon '{}' for app_id '{}' via StartupWMClass in {:?}",
-                    icon, app_id, desktop_path
-                );
-                return Some(icon);
-            }
-        }
+        let desktop_path = self.wmclass_index.get(&app_id_lower)?;
+        let icon = self.parse_desktop_file(desktop_path)?;
+        debug!(
+            "Found icon '{}' for app_id '{}' via StartupWMClass in {:?}",
+            icon, app_id, desktop_path
+        );
+        Some(icon)
+    }
 
-        // Standard desktop file locations
-        let search_dirs: Vec<PathBuf> = [
-            dirs::data_local_dir().map(|d| d.join("applications")),
-            Some(PathBuf::from("/usr/share/applications")),
-            Some(PathBuf::from("/usr/local/share/applications")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-
-        // Try exact match first: app_id.desktop
-        for dir in &search_dirs {
+    /// Try exact match: app_id.desktop
+    fn try_exact_desktop_match(&self, app_id: &str) -> Option<String> {
+        for dir in &get_application_dirs() {
             let desktop_file = dir.join(format!("{}.desktop", app_id));
             if let Some(icon) = self.parse_desktop_file(&desktop_file) {
                 debug!("Found icon '{}' for app_id '{}' in {:?}", icon, app_id, desktop_file);
                 return Some(icon);
             }
         }
+        None
+    }
 
-        // Try case-insensitive match
-        for dir in &search_dirs {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if let Some(filename) = path.file_name() {
-                        let filename_str = filename.to_string_lossy();
-                        if filename_str.to_lowercase() == format!("{}.desktop", app_id.to_lowercase()) {
-                            if let Some(icon) = self.parse_desktop_file(&path) {
-                                debug!("Found icon '{}' for app_id '{}' (case-insensitive) in {:?}", icon, app_id, path);
-                                return Some(icon);
-                            }
+    /// Try case-insensitive match by scanning directories
+    fn try_case_insensitive_match(&self, app_id: &str) -> Option<String> {
+        let target = format!("{}.desktop", app_id.to_lowercase());
+        for dir in &get_application_dirs() {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(filename) = path.file_name() {
+                    if filename.to_string_lossy().to_lowercase() == target {
+                        if let Some(icon) = self.parse_desktop_file(&path) {
+                            debug!(
+                                "Found icon '{}' for app_id '{}' (case-insensitive) in {:?}",
+                                icon, app_id, path
+                            );
+                            return Some(icon);
                         }
                     }
                 }
             }
         }
+        None
+    }
 
-        // Try common variations: remove spaces, convert to lowercase
-        let variations = vec![
-            app_id.replace(" ", "").to_lowercase(),
-            app_id.replace(" ", "-").to_lowercase(),
+    /// Try common variations: remove spaces, replace with dashes, first word only
+    fn try_common_variations(&self, app_id: &str) -> Option<String> {
+        let variations = [
+            app_id.replace(' ', "").to_lowercase(),
+            app_id.replace(' ', "-").to_lowercase(),
             app_id.split_whitespace().next().unwrap_or("").to_lowercase(),
         ];
 
@@ -171,16 +188,17 @@ impl IconResolver {
             if variation.is_empty() {
                 continue;
             }
-            for dir in &search_dirs {
+            for dir in &get_application_dirs() {
                 let desktop_file = dir.join(format!("{}.desktop", variation));
                 if let Some(icon) = self.parse_desktop_file(&desktop_file) {
-                    debug!("Found icon '{}' for app_id '{}' using variation '{}' in {:?}", icon, app_id, variation, desktop_file);
+                    debug!(
+                        "Found icon '{}' for app_id '{}' using variation '{}' in {:?}",
+                        icon, app_id, variation, desktop_file
+                    );
                     return Some(icon);
                 }
             }
         }
-
-        debug!("No desktop file found for app_id: {}", app_id);
         None
     }
 

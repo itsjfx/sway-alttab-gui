@@ -12,6 +12,16 @@ pub enum KeyEvent {
     ShiftReleased,
 }
 
+/// Trait for keyboard event sources.
+///
+/// This abstraction allows for mock implementations in tests.
+#[allow(dead_code)]
+pub trait KeyboardEventSource: Send {
+    /// Block and wait for the next keyboard event.
+    /// Returns None when the source is exhausted or an error occurs.
+    fn next_event(&mut self) -> Option<KeyEvent>;
+}
+
 pub struct KeyboardMonitor {
     device: Device,
 }
@@ -108,5 +118,50 @@ pub fn check_permissions() -> Result<()> {
             eprintln!("  sudo {}", std::env::current_exe().unwrap_or_default().display());
             Err(e)
         }
+    }
+}
+
+#[cfg(test)]
+pub mod mock {
+    use super::*;
+    use std::collections::VecDeque;
+
+    /// Mock implementation for testing
+    pub struct MockKeyboardSource {
+        events: VecDeque<KeyEvent>,
+    }
+
+    impl MockKeyboardSource {
+        pub fn new() -> Self {
+            MockKeyboardSource {
+                events: VecDeque::new(),
+            }
+        }
+
+        /// Add events to be returned by next_event
+        pub fn add_events(&mut self, events: impl IntoIterator<Item = KeyEvent>) {
+            self.events.extend(events);
+        }
+    }
+
+    impl KeyboardEventSource for MockKeyboardSource {
+        fn next_event(&mut self) -> Option<KeyEvent> {
+            self.events.pop_front()
+        }
+    }
+
+    #[test]
+    fn test_mock_keyboard_source() {
+        let mut source = MockKeyboardSource::new();
+        source.add_events([
+            KeyEvent::AltPressed,
+            KeyEvent::TabPressed,
+            KeyEvent::AltReleased,
+        ]);
+
+        assert_eq!(source.next_event(), Some(KeyEvent::AltPressed));
+        assert_eq!(source.next_event(), Some(KeyEvent::TabPressed));
+        assert_eq!(source.next_event(), Some(KeyEvent::AltReleased));
+        assert_eq!(source.next_event(), None);
     }
 }

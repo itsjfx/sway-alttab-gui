@@ -3,6 +3,13 @@ use evdev::{Device, InputEventKind, Key};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
+/// Device names that should be excluded from keyboard detection.
+/// These devices may report supporting keyboard keys but aren't real keyboards.
+const EXCLUDED_DEVICE_NAMES: &[&str] = &[
+    "Yubico",
+    "YubiKey",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum KeyEvent {
     AltPressed,
@@ -28,8 +35,8 @@ pub struct KeyboardMonitor {
 
 impl KeyboardMonitor {
     /// Find and open a keyboard device
-    pub fn new() -> Result<Self> {
-        let device = Self::find_keyboard_device()
+    pub fn new(device_name: Option<&str>) -> Result<Self> {
+        let device = Self::find_keyboard_device(device_name)
             .context("Failed to find keyboard device")?;
 
         info!("Using keyboard device: {:?}", device.name());
@@ -37,17 +44,46 @@ impl KeyboardMonitor {
         Ok(KeyboardMonitor { device })
     }
 
+    /// Check if a device name should be excluded
+    fn is_excluded(name: &str) -> bool {
+        EXCLUDED_DEVICE_NAMES.iter().any(|excluded| name.contains(excluded))
+    }
+
     /// Find a suitable keyboard device from /dev/input/event*
-    fn find_keyboard_device() -> Result<Device> {
+    fn find_keyboard_device(device_name: Option<&str>) -> Result<Device> {
         let devices = evdev::enumerate();
 
-        // Look for a device that supports the keys we need
-        for (_, device) in devices {
+        // If user specified a device name, find exact match
+        if let Some(requested_name) = device_name {
+            for (_, device) in devices {
+                if let Some(name) = device.name() {
+                    if name == requested_name {
+                        info!("Found requested keyboard device: {:?}", name);
+                        return Ok(device);
+                    }
+                }
+            }
+            anyhow::bail!(
+                "Keyboard device '{}' not found. Check available devices with: cat /proc/bus/input/devices",
+                requested_name
+            );
+        }
+
+        // Otherwise, look for a device that supports the keys we need
+        for (_, device) in evdev::enumerate() {
+            if let Some(name) = device.name() {
+                if Self::is_excluded(name) {
+                    debug!("Skipping excluded device: {:?}", name);
+                    continue;
+                }
+            }
+
             if let Some(keys) = device.supported_keys() {
                 // Check if device supports Alt, Shift, and Tab
                 if keys.contains(Key::KEY_LEFTALT)
                     && keys.contains(Key::KEY_TAB)
-                    && keys.contains(Key::KEY_LEFTSHIFT) {
+                    && keys.contains(Key::KEY_LEFTSHIFT)
+                {
                     debug!("Found suitable keyboard: {:?}", device.name());
                     return Ok(device);
                 }
@@ -100,8 +136,8 @@ impl KeyboardMonitor {
 }
 
 /// Check if the current user has permission to read keyboard devices
-pub fn check_permissions() -> Result<()> {
-    let test_device = KeyboardMonitor::find_keyboard_device();
+pub fn check_permissions(device_name: Option<&str>) -> Result<()> {
+    let test_device = KeyboardMonitor::find_keyboard_device(device_name);
 
     match test_device {
         Ok(_) => {
@@ -163,5 +199,41 @@ pub mod mock {
         assert_eq!(source.next_event(), Some(KeyEvent::TabPressed));
         assert_eq!(source.next_event(), Some(KeyEvent::AltReleased));
         assert_eq!(source.next_event(), None);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_excluded_yubikey_variants() {
+        // Should exclude various Yubikey device names
+        assert!(KeyboardMonitor::is_excluded("Yubico YubiKey OTP+FIDO"));
+        assert!(KeyboardMonitor::is_excluded("Yubico YubiKey OTP+FIDO+CCID"));
+        assert!(KeyboardMonitor::is_excluded("YubiKey NEO"));
+        assert!(KeyboardMonitor::is_excluded("Yubico Yubikey"));
+    }
+
+    #[test]
+    fn test_is_excluded_real_keyboards() {
+        // Should not exclude real keyboards
+        assert!(!KeyboardMonitor::is_excluded("AT Translated Set 2 keyboard"));
+        assert!(!KeyboardMonitor::is_excluded("Logitech USB Keyboard"));
+        assert!(!KeyboardMonitor::is_excluded("Dell KB216 Wired Keyboard"));
+        assert!(!KeyboardMonitor::is_excluded("Microsoft Natural Ergonomic Keyboard"));
+    }
+
+    #[test]
+    fn test_is_excluded_case_sensitive() {
+        // Exclusion is case-sensitive (matching the device names exactly)
+        assert!(!KeyboardMonitor::is_excluded("yubico"));
+        assert!(!KeyboardMonitor::is_excluded("yubikey"));
+        assert!(!KeyboardMonitor::is_excluded("YUBICO"));
+    }
+
+    #[test]
+    fn test_is_excluded_empty_string() {
+        assert!(!KeyboardMonitor::is_excluded(""));
     }
 }

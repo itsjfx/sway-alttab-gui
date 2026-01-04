@@ -20,6 +20,10 @@ pub struct Config {
     /// Enable verbose logging
     #[arg(short, long)]
     pub verbose: bool,
+
+    /// Keyboard device name to use (exact match)
+    #[arg(long)]
+    pub device: Option<String>,
 }
 
 impl Config {

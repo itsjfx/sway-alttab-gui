@@ -39,11 +39,8 @@ fn check_pidfile() -> Result<()> {
 
     if pidfile.exists() {
         // Read the PID from the file
-        let pid_str = fs::read_to_string(&pidfile)
-            .context("Failed to read pidfile")?;
-        let pid: u32 = pid_str.trim()
-            .parse()
-            .context("Invalid PID in pidfile")?;
+        let pid_str = fs::read_to_string(&pidfile).context("Failed to read pidfile")?;
+        let pid: u32 = pid_str.trim().parse().context("Invalid PID in pidfile")?;
 
         // Check if the process is still running
         if process_exists(pid) {
@@ -76,8 +73,7 @@ fn create_pidfile() -> Result<PidfileGuard> {
     let pidfile = get_pidfile_path()?;
     let pid = std::process::id();
 
-    fs::write(&pidfile, pid.to_string())
-        .context("Failed to write pidfile")?;
+    fs::write(&pidfile, pid.to_string()).context("Failed to write pidfile")?;
 
     info!("Created pidfile at {} with PID {}", pidfile.display(), pid);
 
@@ -132,7 +128,7 @@ fn main() -> Result<()> {
     let _pidfile_guard = create_pidfile()?;
 
     // Check keyboard device permissions
-    keyboard_monitor::check_permissions()?;
+    keyboard_monitor::check_permissions(config.device.as_deref())?;
 
     // Build WMClass index at startup (before GTK, so it's ready when needed)
     info!("Building WMClass index for icon resolution...");
@@ -143,7 +139,7 @@ fn main() -> Result<()> {
 
     // Create GTK Application
     let app = gtk4::Application::builder()
-        .application_id("com.github.sway-alttab")
+        .application_id("com.github.itsjfx.sway-alttab-gui")
         .build();
 
     let wmclass_index_clone = wmclass_index.clone();
@@ -199,7 +195,7 @@ async fn run_daemon(
     let (key_tx, key_rx) = mpsc::unbounded_channel();
 
     // Create and start keyboard monitor
-    let keyboard_monitor = KeyboardMonitor::new()?;
+    let keyboard_monitor = KeyboardMonitor::new(config.device.as_deref())?;
 
     // Spawn keyboard monitoring in a dedicated blocking thread
     std::thread::spawn(move || {

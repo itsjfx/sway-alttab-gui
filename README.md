@@ -33,7 +33,17 @@ cargo build --release
 
 ### Prerequisites
 
-The daemon needs permission to read keyboard events from `/dev/input/event*` devices. Add your user to the `input` group:
+The daemon needs permission to read keyboard events from `/dev/input/event*` devices.
+
+**Recommended: Install the udev rule** (grants session-based access via ACLs):
+
+```bash
+sudo cp udev/70-sway-alttab.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=input
+```
+
+**Alternative: Add your user to the `input` group**:
 
 ```bash
 sudo usermod -aG input $USER
@@ -119,10 +129,20 @@ Options:
 ```
 ERROR: Cannot access keyboard devices.
 This daemon needs permission to read /dev/input/event* devices.
+```
 
-To fix this, add your user to the 'input' group:
-  sudo usermod -aG input $USER
-  (then log out and log back in)
+**Recommended fix**: Install the udev rule (no logout required):
+
+```bash
+sudo cp udev/70-sway-alttab.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger --subsystem-match=input
+```
+
+**Alternative**: Add your user to the `input` group, then log out and back in:
+
+```bash
+sudo usermod -aG input $USER
 ```
 
 ### No Windows Found

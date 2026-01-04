@@ -147,11 +147,15 @@ pub fn check_permissions(device_name: Option<&str>) -> Result<()> {
         Err(e) => {
             eprintln!("ERROR: Cannot access keyboard devices.");
             eprintln!("This daemon needs permission to read /dev/input/event* devices.");
-            eprintln!("\nTo fix this, add your user to the 'input' group:");
+            eprintln!();
+            eprintln!("Recommended: Install the udev rule for session-based access:");
+            eprintln!("  sudo cp udev/70-sway-alttab.rules /etc/udev/rules.d/");
+            eprintln!("  sudo udevadm control --reload-rules");
+            eprintln!("  sudo udevadm trigger --subsystem-match=input");
+            eprintln!();
+            eprintln!("Alternative: Add your user to the 'input' group:");
             eprintln!("  sudo usermod -aG input $USER");
             eprintln!("  (then log out and log back in)");
-            eprintln!("\nOr run with elevated permissions (not recommended):");
-            eprintln!("  sudo {}", std::env::current_exe().unwrap_or_default().display());
             Err(e)
         }
     }

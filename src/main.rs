@@ -24,14 +24,8 @@ use ui::SwitcherWindow;
 /// Get the path to the pidfile
 fn get_pidfile_path() -> Result<PathBuf> {
     // Try to use XDG_RUNTIME_DIR, fall back to ~/.cache
-    let runtime_dir = std::env::var("XDG_RUNTIME_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var("HOME")
-                .ok()
-                .map(|home| PathBuf::from(home).join(".cache"))
-        })
+    let runtime_dir = dirs::runtime_dir()
+        .or_else(|| dirs::cache_dir())
         .context("Could not determine runtime directory")?;
 
     Ok(runtime_dir.join("sway-alttab.pid"))

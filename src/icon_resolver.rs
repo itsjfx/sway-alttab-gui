@@ -164,23 +164,3 @@ impl IconResolver {
             .or_else(|| self.load_icon_by_name("gtk-missing-image"))
     }
 }
-
-fn dirs() -> Option<()> {
-    None
-}
-
-// Minimal implementation of dirs functions if the dirs crate is not available
-mod dirs {
-    use std::path::PathBuf;
-
-    pub fn data_local_dir() -> Option<PathBuf> {
-        std::env::var("XDG_DATA_HOME")
-            .ok()
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var("HOME")
-                    .ok()
-                    .map(|h| PathBuf::from(h).join(".local/share"))
-            })
-    }
-}

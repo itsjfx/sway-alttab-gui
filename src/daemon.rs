@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::icon_resolver::WmClassIndex;
-use crate::keyboard_monitor::KeyEvent;
+use crate::ipc::IpcCommand;
 use crate::ui_commands::UiCommand;
 use crate::window_manager::WindowManager;
 use crate::window_switcher::WindowSwitcher;
@@ -18,8 +18,6 @@ enum WindowEvent {
 pub struct Daemon {
     window_manager: WindowManager,
     config: Config,
-    shift_pressed: bool,
-    alt_pressed: bool,
     /// Active window switcher session, or None if idle
     switcher: Option<WindowSwitcher>,
     ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
@@ -37,8 +35,6 @@ impl Daemon {
         Ok(Daemon {
             window_manager,
             config,
-            shift_pressed: false,
-            alt_pressed: false,
             switcher: None,
             ui_tx,
             wmclass_index,
@@ -50,10 +46,10 @@ impl Daemon {
         self.switcher.is_some()
     }
 
-    /// Main event loop
+    /// Main event loop - accepts IpcCommand from socket
     pub async fn run(
         mut self,
-        mut key_rx: mpsc::UnboundedReceiver<KeyEvent>,
+        mut ipc_rx: mpsc::UnboundedReceiver<IpcCommand>,
     ) -> Result<()> {
         info!("Starting daemon event loop");
 
@@ -71,9 +67,16 @@ impl Daemon {
         // Main event loop
         loop {
             tokio::select! {
-                Some(key_event) = key_rx.recv() => {
-                    debug!("Received key event: {:?}", key_event);
-                    self.handle_key_event(key_event)?;
+                Some(ipc_cmd) = ipc_rx.recv() => {
+                    debug!("Received IPC command: {:?}", ipc_cmd);
+
+                    // Handle shutdown specially
+                    if matches!(ipc_cmd, IpcCommand::Shutdown) {
+                        info!("Received shutdown command");
+                        break;
+                    }
+
+                    self.handle_ipc_command(ipc_cmd)?;
                 }
                 Some(window_event) = window_rx.recv() => {
                     debug!("Received window event: {:?}", window_event);
@@ -86,45 +89,61 @@ impl Daemon {
             }
         }
 
-        error!("Daemon event loop exited");
+        info!("Daemon shutting down gracefully");
         sway_events.abort();
         Ok(())
     }
 
-    fn handle_key_event(&mut self, event: KeyEvent) -> Result<()> {
-        debug!(
-            "Key event: {:?}, switching: {}",
-            event,
-            self.is_switching()
-        );
+    fn handle_ipc_command(&mut self, cmd: IpcCommand) -> Result<()> {
+        debug!("IPC command: {:?}, switching: {}", cmd, self.is_switching());
 
-        match event {
-            KeyEvent::AltPressed => {
-                self.alt_pressed = true;
+        match cmd {
+            IpcCommand::Show => {
+                if !self.is_switching() {
+                    self.start_switching()?;
+                } else {
+                    // If already switching, Show acts like Next
+                    self.cycle_windows(true)?;
+                }
             }
-            KeyEvent::AltReleased => {
-                self.alt_pressed = false;
-                // If we're in switching mode, select the current window
+            IpcCommand::Next => {
+                if self.is_switching() {
+                    self.cycle_windows(true)?;
+                } else {
+                    // If not switching, start switching
+                    self.start_switching()?;
+                }
+            }
+            IpcCommand::Prev => {
+                if self.is_switching() {
+                    self.cycle_windows(false)?;
+                } else {
+                    // If not switching, start and go to previous
+                    self.start_switching()?;
+                    // After start, we're at index 1, go back to 0 (previous from MRU)
+                    self.cycle_windows(false)?;
+                }
+            }
+            IpcCommand::Select => {
                 if self.is_switching() {
                     self.finalize_selection()?;
                 }
             }
-            KeyEvent::ShiftPressed => {
-                self.shift_pressed = true;
-            }
-            KeyEvent::ShiftReleased => {
-                self.shift_pressed = false;
-            }
-            KeyEvent::TabPressed => {
-                if self.alt_pressed {
-                    if self.is_switching() {
-                        // Cycle through windows
-                        self.cycle_windows(!self.shift_pressed)?;
-                    } else {
-                        // Start switching mode
-                        self.start_switching()?;
-                    }
+            IpcCommand::Cancel => {
+                if self.is_switching() {
+                    self.cancel_switching()?;
                 }
+            }
+            IpcCommand::Status => {
+                // Status is handled at the socket level, but log it here
+                debug!(
+                    "Status query: switching={}, windows={}",
+                    self.is_switching(),
+                    self.switcher.as_ref().map_or(0, |s| s.windows().len())
+                );
+            }
+            IpcCommand::Shutdown => {
+                // Handled in run() loop
             }
         }
 
@@ -251,6 +270,22 @@ impl Daemon {
             // Update MRU order immediately (don't wait for Sway event)
             self.window_manager.on_focus(window_id);
         }
+
+        // Hide UI if available
+        if let Some(ref ui_tx) = self.ui_tx {
+            if let Err(e) = ui_tx.send(UiCommand::Hide) {
+                debug!("Failed to send hide command to UI (channel closed): {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Cancel switching without selecting a window
+    fn cancel_switching(&mut self) -> Result<()> {
+        info!("Canceling window switching");
+
+        self.switcher = None;
 
         // Hide UI if available
         if let Some(ref ui_tx) = self.ui_tx {

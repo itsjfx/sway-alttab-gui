@@ -1,7 +1,9 @@
 mod config;
 mod daemon;
 mod icon_resolver;
-mod keyboard_monitor;
+mod ipc;
+mod socket_client;
+mod socket_server;
 mod sway_client;
 mod ui;
 mod ui_commands;
@@ -10,11 +12,11 @@ mod window_manager;
 mod window_switcher;
 
 use anyhow::{Context, Result};
-use config::Config;
+use config::{Command, Config};
 use daemon::Daemon;
 use gtk4::prelude::*;
 use icon_resolver::{IconResolver, WmClassIndex};
-use keyboard_monitor::KeyboardMonitor;
+use ipc::IpcCommand;
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
@@ -111,6 +113,20 @@ fn main() -> Result<()> {
         .with_target(false)
         .init();
 
+    // Dispatch based on command
+    match config.command() {
+        Command::Daemon => run_daemon_mode(config),
+        Command::Show => socket_client::send_command_and_exit(IpcCommand::Show),
+        Command::Next => socket_client::send_command_and_exit(IpcCommand::Next),
+        Command::Prev => socket_client::send_command_and_exit(IpcCommand::Prev),
+        Command::Select => socket_client::send_command_and_exit(IpcCommand::Select),
+        Command::Cancel => socket_client::send_command_and_exit(IpcCommand::Cancel),
+        Command::Status => socket_client::send_command_and_exit(IpcCommand::Status),
+        Command::Shutdown => socket_client::send_command_and_exit(IpcCommand::Shutdown),
+    }
+}
+
+fn run_daemon_mode(config: Config) -> Result<()> {
     // Ignore SIGUSR1 signal to prevent crashes
     #[cfg(unix)]
     unsafe {
@@ -126,9 +142,6 @@ fn main() -> Result<()> {
 
     // Create pidfile (will be automatically removed when the guard is dropped)
     let _pidfile_guard = create_pidfile()?;
-
-    // Check keyboard device permissions
-    keyboard_monitor::check_permissions(config.device.as_deref())?;
 
     // Build WMClass index at startup (before GTK, so it's ready when needed)
     info!("Building WMClass index for icon resolution...");
@@ -165,7 +178,7 @@ fn main() -> Result<()> {
 
             // Run daemon in Tokio runtime
             rt.block_on(async move {
-                match run_daemon(config_clone, ui_cmd_tx, wmclass_index_for_daemon).await {
+                match run_daemon_async(config_clone, ui_cmd_tx, wmclass_index_for_daemon).await {
                     Ok(_) => {
                         info!("Daemon exited normally");
                     }
@@ -179,36 +192,25 @@ fn main() -> Result<()> {
         });
     });
 
-    // Run GTK application
-    app.run();
+    // Run GTK application (pass empty args since we already parsed with clap)
+    app.run_with_args::<&str>(&[]);
 
     Ok(())
 }
 
-/// Run the async daemon logic within the GLib event loop
-async fn run_daemon(
+/// Run the async daemon logic with socket IPC
+async fn run_daemon_async(
     config: Config,
     ui_cmd_tx: mpsc::UnboundedSender<ui_commands::UiCommand>,
     wmclass_index: WmClassIndex,
 ) -> Result<()> {
-    // Create communication channels
-    let (key_tx, key_rx) = mpsc::unbounded_channel();
+    // Start IPC socket server
+    let (ipc_rx, _socket_guard) = socket_server::start_server().await?;
 
-    // Create and start keyboard monitor
-    let keyboard_monitor = KeyboardMonitor::new(config.device.as_deref())?;
-
-    // Spawn keyboard monitoring in a dedicated blocking thread
-    std::thread::spawn(move || {
-        if let Err(e) = keyboard_monitor.monitor_blocking(key_tx) {
-            error!("Keyboard monitor error: {}", e);
-        }
-    });
-
-    // Create and run daemon with the WMClass index
+    // Create and run daemon
     let daemon = Daemon::new(config, Some(ui_cmd_tx), wmclass_index)?;
     info!("Starting daemon event loop");
-    daemon.run(key_rx).await?;
+    daemon.run(ipc_rx).await?;
 
-    error!("Daemon run() returned - this should never happen!");
     Ok(())
 }

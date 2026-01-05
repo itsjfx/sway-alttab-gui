@@ -1,11 +1,15 @@
 use crate::icon_resolver::{IconResolver, WmClassIndex};
+use crate::ipc::IpcCommand;
+use crate::socket_client;
 use crate::window_manager::WindowInfo;
+use gtk4::gdk::Key;
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GtkBox, Image, Label, Orientation,
+    Application, ApplicationWindow, Box as GtkBox, EventControllerKey, Image, Label, Orientation,
     Widget,
 };
-use tracing::{debug, info};
+use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use tracing::{debug, info, warn};
 
 const ICON_SIZE: i32 = 64;
 const WINDOW_PADDING: i32 = 20;
@@ -31,6 +35,69 @@ impl SwitcherWindow {
             .resizable(false)
             .build();
 
+        // Initialize layer shell
+        window.init_layer_shell();
+        window.set_layer(Layer::Overlay);
+        window.set_keyboard_mode(KeyboardMode::Exclusive);
+
+        // Center the window
+        window.set_anchor(Edge::Top, false);
+        window.set_anchor(Edge::Bottom, false);
+        window.set_anchor(Edge::Left, false);
+        window.set_anchor(Edge::Right, false);
+
+        // Setup keyboard event controller
+        let key_controller = EventControllerKey::new();
+        key_controller.connect_key_pressed(|_controller, keyval, _keycode, state| {
+            debug!("Key pressed: {:?}, state: {:?}", keyval, state);
+
+            match keyval {
+                Key::Tab => {
+                    // Check if Shift is held
+                    if state.contains(gtk4::gdk::ModifierType::SHIFT_MASK) {
+                        debug!("Shift+Tab pressed, sending prev");
+                        send_ipc_command(IpcCommand::Prev);
+                    } else {
+                        debug!("Tab pressed, sending next");
+                        send_ipc_command(IpcCommand::Next);
+                    }
+                    gtk4::glib::Propagation::Stop
+                }
+                Key::ISO_Left_Tab => {
+                    // Shift+Tab often generates ISO_Left_Tab
+                    debug!("ISO_Left_Tab (Shift+Tab) pressed, sending prev");
+                    send_ipc_command(IpcCommand::Prev);
+                    gtk4::glib::Propagation::Stop
+                }
+                Key::Escape => {
+                    debug!("Escape pressed, sending cancel");
+                    send_ipc_command(IpcCommand::Cancel);
+                    gtk4::glib::Propagation::Stop
+                }
+                Key::Return | Key::KP_Enter => {
+                    debug!("Enter pressed, sending select");
+                    send_ipc_command(IpcCommand::Select);
+                    gtk4::glib::Propagation::Stop
+                }
+                _ => gtk4::glib::Propagation::Proceed,
+            }
+        });
+
+        // Detect Alt release
+        key_controller.connect_key_released(|_controller, keyval, _keycode, _state| {
+            debug!("Key released: {:?}", keyval);
+
+            match keyval {
+                Key::Alt_L | Key::Alt_R => {
+                    debug!("Alt released, sending select");
+                    send_ipc_command(IpcCommand::Select);
+                }
+                _ => {}
+            }
+        });
+
+        window.add_controller(key_controller);
+
         // Create horizontal container for window tiles
         let container = GtkBox::new(Orientation::Horizontal, TILE_PADDING);
         container.set_margin_start(WINDOW_PADDING);
@@ -52,7 +119,12 @@ impl SwitcherWindow {
     }
 
     /// Show the window switcher with a list of windows
-    pub fn show(&mut self, windows: Vec<WindowInfo>, initial_index: usize, wmclass_index: WmClassIndex) {
+    pub fn show(
+        &mut self,
+        windows: Vec<WindowInfo>,
+        initial_index: usize,
+        wmclass_index: WmClassIndex,
+    ) {
         self.windows = windows;
         self.current_index = initial_index.min(self.windows.len().saturating_sub(1));
 
@@ -83,7 +155,10 @@ impl SwitcherWindow {
         info!("Presenting window...");
         self.window.set_visible(true);
         self.window.present();
-        info!("Window presented, is_visible={}", self.window.is_visible());
+        info!(
+            "Window presented, is_visible={}",
+            self.window.is_visible()
+        );
     }
 
     fn create_window_tile(&self, window: &WindowInfo, icon_resolver: &mut IconResolver) -> Widget {
@@ -92,24 +167,26 @@ impl SwitcherWindow {
         vbox.set_margin_end(TILE_PADDING);
 
         // Add icon - try app_id first, then window_class as fallback
-        let icon_found = if let Some(pixbuf) = icon_resolver.resolve_icon(window.app_id.as_deref()) {
-            let icon = Image::from_pixbuf(Some(&pixbuf));
-            icon.set_pixel_size(ICON_SIZE);
-            vbox.append(&icon);
-            true
-        } else if let Some(pixbuf) = icon_resolver.resolve_icon(window.window_class.as_deref()) {
-            let icon = Image::from_pixbuf(Some(&pixbuf));
-            icon.set_pixel_size(ICON_SIZE);
-            vbox.append(&icon);
-            true
-        } else if let Some(fallback) = icon_resolver.get_fallback_icon() {
-            let icon = Image::from_pixbuf(Some(&fallback));
-            icon.set_pixel_size(ICON_SIZE);
-            vbox.append(&icon);
-            true
-        } else {
-            false
-        };
+        let icon_found =
+            if let Some(pixbuf) = icon_resolver.resolve_icon(window.app_id.as_deref()) {
+                let icon = Image::from_pixbuf(Some(&pixbuf));
+                icon.set_pixel_size(ICON_SIZE);
+                vbox.append(&icon);
+                true
+            } else if let Some(pixbuf) = icon_resolver.resolve_icon(window.window_class.as_deref())
+            {
+                let icon = Image::from_pixbuf(Some(&pixbuf));
+                icon.set_pixel_size(ICON_SIZE);
+                vbox.append(&icon);
+                true
+            } else if let Some(fallback) = icon_resolver.get_fallback_icon() {
+                let icon = Image::from_pixbuf(Some(&fallback));
+                icon.set_pixel_size(ICON_SIZE);
+                vbox.append(&icon);
+                true
+            } else {
+                false
+            };
 
         if !icon_found {
             // Absolute fallback: just a placeholder label
@@ -165,7 +242,10 @@ impl SwitcherWindow {
             self.highlight_tile(new_tile);
         }
 
-        debug!("Cycled to window {}: {:?}", self.current_index, self.windows[self.current_index].title);
+        debug!(
+            "Cycled to window {}: {:?}",
+            self.current_index, self.windows[self.current_index].title
+        );
     }
 
     /// Cycle to next window
@@ -183,6 +263,16 @@ impl SwitcherWindow {
         info!("Hiding window (not closing, so GTK app stays alive)");
         self.window.set_visible(false);
     }
+}
+
+/// Send an IPC command to the daemon
+fn send_ipc_command(cmd: IpcCommand) {
+    // Spawn in a thread to avoid blocking GTK main loop
+    std::thread::spawn(move || {
+        if let Err(e) = socket_client::send_command(cmd) {
+            warn!("Failed to send IPC command: {}", e);
+        }
+    });
 }
 
 fn truncate_string(s: &str, max_len: usize) -> String {

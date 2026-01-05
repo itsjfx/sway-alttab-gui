@@ -2,26 +2,31 @@
 
 Windows-style Alt-Tab window switcher for Sway (Wayland compositor).
 
-## Overview
-
-This daemon provides a familiar Alt+Tab window switching experience for Sway, similar to Windows. It runs in the background, monitors keyboard input, tracks window focus history, and allows you to cycle through windows in MRU (Most Recently Used) order.
-
-## Current Status
-
-**Phase 1: Core Functionality (No UI)**
-
-The current implementation focuses on the core Alt+Tab behavior without a graphical UI. Instead, it prints the window list to stderr, allowing you to verify the behavior before adding the GTK UI.
-
 ## Features
 
-- ✅ Background daemon with async Tokio runtime
-- ✅ Keyboard input monitoring via evdev (Alt, Tab, Shift detection)
-- ✅ Window tracking via Sway IPC
-- ✅ MRU (Most Recently Used) window ordering
-- ✅ Two modes: current workspace vs all workspaces
-- ✅ Alt+Tab to cycle forward, Alt+Shift+Tab to cycle backward
-- ✅ Alt release to select window
-- ⏳ GTK4 UI (planned for Phase 2)
+- GTK4 visual window switcher with icons
+- MRU (Most Recently Used) window ordering
+- Alt+Tab to cycle forward, Shift+Tab to cycle backward
+- Alt release to select window (via layer-shell keyboard grab)
+- Two modes: current workspace vs all workspaces
+- No special permissions required (no udev rules or input group)
+
+## Dependencies
+
+### Build Dependencies
+
+```bash
+# Arch Linux
+sudo pacman -S gtk4 gtk4-layer-shell
+
+# Other distros: install gtk4 and gtk4-layer-shell development packages
+```
+
+### Runtime Dependencies
+
+- `gtk4`
+- `gtk4-layer-shell`
+- Sway (or compatible Wayland compositor with layer-shell support)
 
 ## Building
 
@@ -29,125 +34,91 @@ The current implementation focuses on the core Alt+Tab behavior without a graphi
 cargo build --release
 ```
 
-## Running
-
-### Prerequisites
-
-The daemon needs permission to read keyboard events from `/dev/input/event*` devices.
-
-**Recommended: Install the udev rule** (grants session-based access via ACLs):
+## Installation
 
 ```bash
-sudo cp udev/70-sway-alttab.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=input
+# Copy binary to your PATH
+cp target/release/sway-alttab ~/bin/
+
+# Or install via cargo
+cargo install --path .
 ```
 
-**Alternative: Add your user to the `input` group**:
+## Sway Configuration
+
+Add to your `~/.config/sway/config`:
 
 ```bash
-sudo usermod -aG input $USER
+# Start the daemon on Sway startup
+exec --no-startup-id sway-alttab daemon
+
+# Bind Alt+Tab to show the switcher
+bindsym Mod1+Tab exec sway-alttab show
 ```
 
-Then **log out and log back in** for the group change to take effect.
+The layer-shell window grabs keyboard exclusively when visible, so:
+- **Tab** cycles forward
+- **Shift+Tab** cycles backward
+- **Alt release** selects the window
+- **Escape** cancels
+- **Enter** also selects
 
-### Start the Daemon
+## Usage
+
+### CLI Commands
 
 ```bash
-# Show windows from current workspace only (default)
-./target/release/sway-alttab
+sway-alttab [OPTIONS] [COMMAND]
 
-# Show windows from all workspaces
-./target/release/sway-alttab --mode all
-
-# Enable verbose logging
-./target/release/sway-alttab --verbose
-```
-
-### Usage
-
-1. Press **Alt+Tab** to start window switching
-   - The window list will be printed to stderr
-   - The second window (index 1) will be selected by default
-
-2. While holding **Alt**:
-   - Press **Tab** to cycle forward through windows
-   - Press **Shift+Tab** to cycle backward through windows
-
-3. Release **Alt** to focus the selected window
-
-### Example Output
-
-```
-=== Window Switcher ===
-    [94489317269056] Alacritty - ~/projects
->>> [94489320495616] firefox - Mozilla Firefox
-    [94489318582592] Code - ~/projects/sway-alttab
-=======================
-
-SELECTING: Mozilla Firefox (ID: 94489320495616)
-```
-
-## Configuration
-
-All configuration is done via CLI flags (no config file):
-
-```bash
-sway-alttab [OPTIONS]
+Commands:
+  daemon    Run as daemon (default)
+  show      Show the window switcher
+  next      Cycle to next window
+  prev      Cycle to previous window
+  select    Select current window
+  cancel    Cancel without selecting
+  status    Query daemon status
+  shutdown  Shutdown the daemon
 
 Options:
-  -m, --mode <MODE>  Workspace filtering mode [default: current] [possible values: current, all]
+  -m, --mode <MODE>  Workspace filter [default: current] [values: current, all]
   -v, --verbose      Enable verbose logging
-  -h, --help         Print help
+```
+
+### Examples
+
+```bash
+# Start daemon (usually via sway config)
+sway-alttab daemon
+
+# Start daemon showing all workspaces
+sway-alttab --mode all daemon
+
+# Manually trigger switcher (usually via keybinding)
+sway-alttab show
 ```
 
 ## Architecture
 
-- **main.rs**: Entry point, initializes Tokio runtime
-- **daemon.rs**: Main event loop, state machine (Idle/Switching)
-- **window_manager.rs**: Tracks windows via Sway IPC, maintains MRU list
-- **keyboard_monitor.rs**: Reads raw keyboard events via evdev
-- **config.rs**: CLI configuration with clap
-
-### Threading Model
-
-- Tokio async runtime for daemon event loop
-- Separate async task for keyboard monitoring
-- Separate async task for Sway IPC event monitoring
-
-## Next Steps (Phase 2)
-
-1. Add GTK4 UI to display window switcher visually
-2. Implement icon resolution from desktop files
-3. Add proper window previews/thumbnails
-4. Create systemd user service for auto-start
-
-## Troubleshooting
-
-### Permission Denied for /dev/input
-
 ```
-ERROR: Cannot access keyboard devices.
-This daemon needs permission to read /dev/input/event* devices.
+[Sway keybinding] → [CLI: sway-alttab show] → [Unix socket] → [Daemon] → [GTK UI]
+                                                    ↑
+[GTK keyboard events] → [CLI: sway-alttab next/select] ─┘
 ```
 
-**Recommended fix**: Install the udev rule (no logout required):
+- **Daemon**: Runs GTK application, listens on Unix socket for commands
+- **CLI**: Sends commands to daemon via socket
+- **Layer-shell**: GTK window grabs keyboard exclusively when visible
+- **IPC**: Simple text protocol over Unix socket at `$XDG_RUNTIME_DIR/sway-alttab.sock`
 
-```bash
-sudo cp udev/70-sway-alttab.rules /etc/udev/rules.d/
-sudo udevadm control --reload-rules
-sudo udevadm trigger --subsystem-match=input
-```
+### Key Files
 
-**Alternative**: Add your user to the `input` group, then log out and back in:
-
-```bash
-sudo usermod -aG input $USER
-```
-
-### No Windows Found
-
-Make sure you're running the daemon inside a Sway session and have some windows open.
+- `main.rs` - Entry point, CLI dispatch
+- `daemon.rs` - Event loop, window switching state machine
+- `ui.rs` - GTK4 layer-shell window with keyboard handling
+- `socket_server.rs` / `socket_client.rs` - Unix socket IPC
+- `window_manager.rs` - Sway IPC, MRU tracking
+- `icon_resolver.rs` - Desktop file icon resolution
 
 ## License
 

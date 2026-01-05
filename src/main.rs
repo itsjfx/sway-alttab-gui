@@ -150,6 +150,20 @@ fn run_daemon_mode(config: Config) -> Result<()> {
     // Initialize GTK
     gtk4::init()?;
 
+    // Pre-warm GTK IconTheme cache to avoid slow first alt-tab
+    // The first lookup_icon() call triggers GTK to parse and index all icon theme directories
+    {
+        let theme = gtk4::IconTheme::new();
+        let _ = theme.lookup_icon(
+            "application-x-executable",
+            &[],
+            64,
+            1,
+            gtk4::TextDirection::None,
+            gtk4::IconLookupFlags::empty(),
+        );
+    }
+
     // Create GTK Application
     let app = gtk4::Application::builder()
         .application_id("com.github.itsjfx.sway-alttab-gui")
@@ -162,6 +176,9 @@ fn run_daemon_mode(config: Config) -> Result<()> {
 
         // Create SwitcherWindow
         let switcher = Rc::new(RefCell::new(SwitcherWindow::new(app)));
+
+        // Pre-realize window to avoid slow first show
+        switcher.borrow().warm_up();
 
         // Create channels for UI communication
         let (ui_cmd_tx, ui_cmd_rx) = mpsc::unbounded_channel();

@@ -118,6 +118,14 @@ impl SwitcherWindow {
         }
     }
 
+    /// Pre-realize the window to avoid slow first show.
+    /// This creates the Wayland surface and layer shell setup without displaying anything.
+    pub fn warm_up(&self) {
+        // Realize creates the underlying GDK surface without showing
+        gtk4::prelude::WidgetExt::realize(&self.window);
+        info!("Window pre-realized for faster first show");
+    }
+
     /// Show the window switcher with a list of windows
     pub fn show(
         &mut self,

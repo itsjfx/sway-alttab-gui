@@ -54,6 +54,7 @@ jobs:
             artifact_name: sway-alttab-linux-arm64
 
     runs-on: ${{ matrix.runner }}
+    container: ubuntu:26.04
 
     steps:
       - name: Checkout
@@ -61,16 +62,18 @@ jobs:
 
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev
+          apt-get update
+          apt-get install -y libgtk-4-dev libgtk4-layer-shell-dev curl build-essential
 
       - name: Setup Rust
         run: |
-          rustup toolchain install stable
-          rustup default stable
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
       - name: Build
-        run: cargo build --release
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --release
 
       - name: Package
         run: |

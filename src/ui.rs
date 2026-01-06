@@ -283,37 +283,32 @@ fn send_ipc_command(cmd: IpcCommand) {
     });
 }
 
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+fn truncate_string(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
+        format!(
+            "{}...",
+            s.chars()
+                .take(max_chars.saturating_sub(3))
+                .collect::<String>()
+        )
     }
 }
 
 /// Setup CSS styling for the window switcher
 pub fn setup_css() {
     let provider = gtk4::CssProvider::new();
-    // In GTK4, use load_from_data instead of load_from_string
+    // Minimal CSS - inherit colors from the user's GTK theme
     provider.load_from_data(
         r#"
         window {
-            background-color: rgba(30, 30, 30, 0.95);
             border-radius: 10px;
-            border: 2px solid rgba(100, 100, 100, 0.5);
-        }
-
-        box {
-            background-color: transparent;
-        }
-
-        label {
-            color: #ffffff;
-            font-size: 12px;
         }
 
         .selected {
-            background-color: rgba(70, 130, 180, 0.7);
+            background-color: alpha(@theme_selected_bg_color, 0.7);
             border-radius: 8px;
         }
         "#,

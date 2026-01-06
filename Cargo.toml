@@ -2,6 +2,12 @@
 name = "sway-alttab"
 version = "0.1.0"
 edition = "2021"
+description = "Windows-style Alt+Tab window switcher for Sway"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/itsjfx/sway-alttab-gui"
+keywords = ["sway", "wayland", "window-switcher", "alt-tab"]
+categories = ["gui"]
+readme = "README.md"
 
 [dependencies]
 tokio = { version = "1", features = ["full", "net"] }
@@ -18,5 +24,6 @@ gtk4 = { version = "0.7", features = ["v4_10"] }
 gtk4-layer-shell = "0.2"
 glib = "0.18"
 freedesktop-desktop-entry = "0.5"
+lazy_static = "1.4"
 libc = "0.2"
 dirs = "5"

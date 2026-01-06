@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use swayipc::{Node, NodeType};
 use tracing::debug;
 
@@ -130,36 +130,42 @@ impl<C: SwayClient> WindowManager<C> {
 ///
 /// The resulting list has:
 /// 1. The focused window first (if any)
-/// 2. Previously known windows in their MRU order (if still present)
+/// 2. Previously known windows in their MRU order (if still present), with fresh data
 /// 3. Newly discovered windows at the end
 fn preserve_mru_order(
     old_windows: Vec<WindowInfo>,
     current_windows: Vec<WindowInfo>,
     focused_id: Option<i64>,
 ) -> Vec<WindowInfo> {
-    let current_ids: HashSet<i64> = current_windows.iter().map(|w| w.id).collect();
-    let mut result = Vec::with_capacity(current_windows.len());
+    // Build a map of current windows by ID for O(1) lookup with fresh data
+    let current_by_id: HashMap<i64, WindowInfo> =
+        current_windows.into_iter().map(|w| (w.id, w)).collect();
+    let mut result = Vec::with_capacity(current_by_id.len());
     let mut added_ids = HashSet::new();
 
     // 1. Add focused window first if it exists in current windows
     if let Some(fid) = focused_id {
-        if let Some(focused_win) = current_windows.iter().find(|w| w.id == fid).cloned() {
+        if let Some(focused_win) = current_by_id.get(&fid).cloned() {
             added_ids.insert(fid);
             result.push(focused_win);
         }
     }
 
     // 2. Add windows from old list that still exist (preserving MRU order)
+    //    Use fresh data from current_by_id
     for old_win in old_windows {
-        if current_ids.contains(&old_win.id) && !added_ids.contains(&old_win.id) {
+        if current_by_id.contains_key(&old_win.id) && !added_ids.contains(&old_win.id) {
             added_ids.insert(old_win.id);
-            result.push(old_win);
+            // Use fresh window data from current scan
+            if let Some(fresh_win) = current_by_id.get(&old_win.id).cloned() {
+                result.push(fresh_win);
+            }
         }
     }
 
     // 3. Add any new windows not in the old list
-    for new_win in current_windows {
-        if !added_ids.contains(&new_win.id) {
+    for (id, new_win) in current_by_id {
+        if !added_ids.contains(&id) {
             result.push(new_win);
         }
     }

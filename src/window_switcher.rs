@@ -33,21 +33,25 @@ impl WindowSwitcher {
     }
 
     /// Get the current window list.
+    #[must_use]
     pub fn windows(&self) -> &[WindowInfo] {
         &self.windows
     }
 
     /// Get the current selection index.
+    #[must_use]
     pub fn current_index(&self) -> usize {
         self.current_index
     }
 
     /// Get the currently selected window, if any.
+    #[must_use]
     pub fn current(&self) -> Option<&WindowInfo> {
         self.windows.get(self.current_index)
     }
 
     /// Check if there are any windows to switch between.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.windows.is_empty()
     }
@@ -70,18 +74,6 @@ impl WindowSwitcher {
         };
 
         self.current_index
-    }
-
-    /// Finalize the selection and return the selected window.
-    ///
-    /// This consumes the switcher and returns the window that was selected.
-    #[allow(dead_code)]
-    pub fn finalize(self) -> Option<WindowInfo> {
-        if self.current_index < self.windows.len() {
-            Some(self.windows.into_iter().nth(self.current_index).unwrap())
-        } else {
-            None
-        }
     }
 }
 
@@ -165,21 +157,4 @@ mod tests {
         assert_eq!(switcher.cycle(false), 0);
     }
 
-    #[test]
-    fn test_finalize_returns_selected() {
-        let windows = vec![make_window(1, "A"), make_window(2, "B"), make_window(3, "C")];
-        let mut switcher = WindowSwitcher::new(windows, false);
-        switcher.cycle(true);
-        switcher.cycle(true);
-
-        let selected = switcher.finalize();
-        assert!(selected.is_some());
-        assert_eq!(selected.unwrap().id, 3);
-    }
-
-    #[test]
-    fn test_finalize_empty() {
-        let switcher = WindowSwitcher::new(vec![], false);
-        assert!(switcher.finalize().is_none());
-    }
 }

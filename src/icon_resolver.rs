@@ -3,24 +3,27 @@ use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::gio::prelude::FileExt;
 use gtk4::IconLookupFlags;
 use gtk4::IconTheme;
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
-/// Get standard XDG application directories plus flatpak locations.
-/// Used for both building the WMClass index and searching for desktop files.
-fn get_application_dirs() -> Vec<PathBuf> {
-    [
-        dirs::data_local_dir().map(|d| d.join("applications")),
-        Some(PathBuf::from("/usr/share/applications")),
-        Some(PathBuf::from("/usr/local/share/applications")),
-        Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
-        dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+lazy_static! {
+    /// Cached XDG application directories plus flatpak locations.
+    /// Computed once at first access.
+    static ref APPLICATION_DIRS: Vec<PathBuf> = {
+        [
+            dirs::data_local_dir().map(|d| d.join("applications")),
+            Some(PathBuf::from("/usr/share/applications")),
+            Some(PathBuf::from("/usr/local/share/applications")),
+            Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
+            dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    };
 }
 
 /// A pre-built index mapping StartupWMClass values to desktop file paths.
@@ -52,9 +55,8 @@ impl IconResolver {
     /// This scans all standard XDG application directories at startup.
     pub fn build_wmclass_index() -> WmClassIndex {
         let mut index = HashMap::new();
-        let search_dirs = get_application_dirs();
 
-        for dir in &search_dirs {
+        for dir in APPLICATION_DIRS.iter() {
             if !dir.exists() {
                 continue;
             }
@@ -138,7 +140,7 @@ impl IconResolver {
         // Try the last segment (e.g., "speedcrunch" from "org.speedcrunch.speedcrunch")
         if let Some(last_segment) = app_id.rsplit('.').next() {
             let last_segment_lower = last_segment.to_lowercase();
-            for dir in &get_application_dirs() {
+            for dir in APPLICATION_DIRS.iter() {
                 let desktop_file = dir.join(format!("{}.desktop", last_segment_lower));
                 if let Some(icon) = self.parse_desktop_file(&desktop_file) {
                     debug!(
@@ -167,7 +169,7 @@ impl IconResolver {
 
     /// Try exact match: app_id.desktop
     fn try_exact_desktop_match(&self, app_id: &str) -> Option<String> {
-        for dir in &get_application_dirs() {
+        for dir in APPLICATION_DIRS.iter() {
             let desktop_file = dir.join(format!("{}.desktop", app_id));
             if let Some(icon) = self.parse_desktop_file(&desktop_file) {
                 debug!("Found icon '{}' for app_id '{}' in {:?}", icon, app_id, desktop_file);
@@ -180,7 +182,7 @@ impl IconResolver {
     /// Try case-insensitive match by scanning directories
     fn try_case_insensitive_match(&self, app_id: &str) -> Option<String> {
         let target = format!("{}.desktop", app_id.to_lowercase());
-        for dir in &get_application_dirs() {
+        for dir in APPLICATION_DIRS.iter() {
             let entries = match std::fs::read_dir(dir) {
                 Ok(entries) => entries,
                 Err(_) => continue,
@@ -215,7 +217,7 @@ impl IconResolver {
             if variation.is_empty() {
                 continue;
             }
-            for dir in &get_application_dirs() {
+            for dir in APPLICATION_DIRS.iter() {
                 let desktop_file = dir.join(format!("{}.desktop", variation));
                 if let Some(icon) = self.parse_desktop_file(&desktop_file) {
                     debug!(

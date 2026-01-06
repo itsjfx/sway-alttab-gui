@@ -20,7 +20,7 @@ pub fn send_command(command: IpcCommand) -> Result<IpcResponse> {
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
 
     // Send command as simple string
-    writeln!(stream, "{}", command.as_str())?;
+    writeln!(stream, "{}", command)?;
     stream.flush()?;
 
     // Read response

@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 /// Commands sent from CLI client to daemon
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,24 +49,38 @@ pub fn get_socket_path() -> Result<PathBuf> {
     Ok(runtime_dir.join("sway-alttab.sock"))
 }
 
-impl IpcCommand {
-    /// Parse from simple string format (for text protocol)
-    pub fn from_str(s: &str) -> Option<Self> {
+/// Error returned when parsing an invalid IpcCommand string
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseIpcCommandError;
+
+impl fmt::Display for ParseIpcCommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid IPC command")
+    }
+}
+
+impl std::error::Error for ParseIpcCommandError {}
+
+impl FromStr for IpcCommand {
+    type Err = ParseIpcCommandError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_lowercase().as_str() {
-            "show" => Some(IpcCommand::Show),
-            "next" => Some(IpcCommand::Next),
-            "prev" => Some(IpcCommand::Prev),
-            "select" => Some(IpcCommand::Select),
-            "cancel" => Some(IpcCommand::Cancel),
-            "status" => Some(IpcCommand::Status),
-            "shutdown" => Some(IpcCommand::Shutdown),
-            _ => None,
+            "show" => Ok(IpcCommand::Show),
+            "next" => Ok(IpcCommand::Next),
+            "prev" => Ok(IpcCommand::Prev),
+            "select" => Ok(IpcCommand::Select),
+            "cancel" => Ok(IpcCommand::Cancel),
+            "status" => Ok(IpcCommand::Status),
+            "shutdown" => Ok(IpcCommand::Shutdown),
+            _ => Err(ParseIpcCommandError),
         }
     }
+}
 
-    /// Convert to string representation
-    pub fn as_str(&self) -> &'static str {
-        match self {
+impl fmt::Display for IpcCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
             IpcCommand::Show => "show",
             IpcCommand::Next => "next",
             IpcCommand::Prev => "prev",
@@ -72,7 +88,8 @@ impl IpcCommand {
             IpcCommand::Cancel => "cancel",
             IpcCommand::Status => "status",
             IpcCommand::Shutdown => "shutdown",
-        }
+        };
+        write!(f, "{}", s)
     }
 }
 
@@ -82,32 +99,32 @@ mod tests {
 
     #[test]
     fn test_ipc_command_from_str() {
-        assert_eq!(IpcCommand::from_str("show"), Some(IpcCommand::Show));
-        assert_eq!(IpcCommand::from_str("next"), Some(IpcCommand::Next));
-        assert_eq!(IpcCommand::from_str("prev"), Some(IpcCommand::Prev));
-        assert_eq!(IpcCommand::from_str("select"), Some(IpcCommand::Select));
-        assert_eq!(IpcCommand::from_str("cancel"), Some(IpcCommand::Cancel));
-        assert_eq!(IpcCommand::from_str("status"), Some(IpcCommand::Status));
-        assert_eq!(IpcCommand::from_str("shutdown"), Some(IpcCommand::Shutdown));
-        assert_eq!(IpcCommand::from_str("invalid"), None);
+        assert_eq!("show".parse(), Ok(IpcCommand::Show));
+        assert_eq!("next".parse(), Ok(IpcCommand::Next));
+        assert_eq!("prev".parse(), Ok(IpcCommand::Prev));
+        assert_eq!("select".parse(), Ok(IpcCommand::Select));
+        assert_eq!("cancel".parse(), Ok(IpcCommand::Cancel));
+        assert_eq!("status".parse(), Ok(IpcCommand::Status));
+        assert_eq!("shutdown".parse(), Ok(IpcCommand::Shutdown));
+        assert_eq!("invalid".parse::<IpcCommand>(), Err(ParseIpcCommandError));
     }
 
     #[test]
     fn test_ipc_command_from_str_case_insensitive() {
-        assert_eq!(IpcCommand::from_str("SHOW"), Some(IpcCommand::Show));
-        assert_eq!(IpcCommand::from_str("Show"), Some(IpcCommand::Show));
-        assert_eq!(IpcCommand::from_str("  show  "), Some(IpcCommand::Show));
+        assert_eq!("SHOW".parse(), Ok(IpcCommand::Show));
+        assert_eq!("Show".parse(), Ok(IpcCommand::Show));
+        assert_eq!("  show  ".parse(), Ok(IpcCommand::Show));
     }
 
     #[test]
-    fn test_ipc_command_as_str() {
-        assert_eq!(IpcCommand::Show.as_str(), "show");
-        assert_eq!(IpcCommand::Next.as_str(), "next");
-        assert_eq!(IpcCommand::Prev.as_str(), "prev");
-        assert_eq!(IpcCommand::Select.as_str(), "select");
-        assert_eq!(IpcCommand::Cancel.as_str(), "cancel");
-        assert_eq!(IpcCommand::Status.as_str(), "status");
-        assert_eq!(IpcCommand::Shutdown.as_str(), "shutdown");
+    fn test_ipc_command_display() {
+        assert_eq!(IpcCommand::Show.to_string(), "show");
+        assert_eq!(IpcCommand::Next.to_string(), "next");
+        assert_eq!(IpcCommand::Prev.to_string(), "prev");
+        assert_eq!(IpcCommand::Select.to_string(), "select");
+        assert_eq!(IpcCommand::Cancel.to_string(), "cancel");
+        assert_eq!(IpcCommand::Status.to_string(), "status");
+        assert_eq!(IpcCommand::Shutdown.to_string(), "shutdown");
     }
 
     #[test]
@@ -123,9 +140,9 @@ mod tests {
         ];
 
         for cmd in commands {
-            let s = cmd.as_str();
-            let parsed = IpcCommand::from_str(s);
-            assert_eq!(parsed, Some(cmd));
+            let s = cmd.to_string();
+            let parsed: IpcCommand = s.parse().unwrap();
+            assert_eq!(parsed, cmd);
         }
     }
 

@@ -1282,6 +1282,7 @@ dependencies = [
  "glib",
  "gtk4",
  "gtk4-layer-shell",
+ "lazy_static",
  "libc",
  "serde",
  "serde_json",

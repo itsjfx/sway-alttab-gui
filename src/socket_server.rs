@@ -79,17 +79,20 @@ async fn handle_client(
     // Read one command per connection
     reader.read_line(&mut line).await?;
 
-    let response = if let Some(cmd) = IpcCommand::from_str(&line) {
-        debug!("Received IPC command: {:?}", cmd);
+    let response = match line.parse::<IpcCommand>() {
+        Ok(cmd) => {
+            debug!("Received IPC command: {:?}", cmd);
 
-        if tx.send(cmd).is_err() {
-            IpcResponse::Error("Daemon is shutting down".to_string())
-        } else {
-            IpcResponse::Ok
+            if tx.send(cmd).is_err() {
+                IpcResponse::Error("Daemon is shutting down".to_string())
+            } else {
+                IpcResponse::Ok
+            }
         }
-    } else {
-        warn!("Unknown IPC command: {}", line.trim());
-        IpcResponse::Error(format!("Unknown command: {}", line.trim()))
+        Err(_) => {
+            warn!("Unknown IPC command: {}", line.trim());
+            IpcResponse::Error(format!("Unknown command: {}", line.trim()))
+        }
     };
 
     // Send response

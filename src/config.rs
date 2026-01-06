@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 pub enum WorkspaceMode {
     /// Show windows from current workspace only
+    #[default]
     Current,
     /// Show windows from all workspaces
     All,
@@ -34,7 +35,7 @@ pub enum Command {
 #[command(about = "Windows-style Alt-Tab window switcher for Sway", long_about = None)]
 pub struct Config {
     /// Workspace filtering mode (only applies to daemon mode)
-    #[arg(short, long, value_enum, default_value = "current")]
+    #[arg(short, long, value_enum, default_value_t)]
     pub mode: WorkspaceMode,
 
     /// Enable verbose logging

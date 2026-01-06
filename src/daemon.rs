@@ -10,6 +10,9 @@ use swayipc_async::{Connection, Event, EventType, WindowChange};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info};
 
+/// Type alias for the optional UI command sender
+type UiSender = Option<mpsc::UnboundedSender<UiCommand>>;
+
 #[derive(Debug, Clone)]
 enum WindowEvent {
     Focus(i64), // Window ID that received focus
@@ -20,16 +23,12 @@ pub struct Daemon {
     config: Config,
     /// Active window switcher session, or None if idle
     switcher: Option<WindowSwitcher>,
-    ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
+    ui_tx: UiSender,
     wmclass_index: WmClassIndex,
 }
 
 impl Daemon {
-    pub fn new(
-        config: Config,
-        ui_tx: Option<mpsc::UnboundedSender<UiCommand>>,
-        wmclass_index: WmClassIndex,
-    ) -> Result<Self> {
+    pub fn new(config: Config, ui_tx: UiSender, wmclass_index: WmClassIndex) -> Result<Self> {
         let window_manager = WindowManager::new()?;
 
         Ok(Daemon {
@@ -239,7 +238,7 @@ impl Daemon {
     }
 
     fn print_switcher_static(switcher: &WindowSwitcher) {
-        eprintln!("\n=== Window Switcher ===");
+        debug!("=== Window Switcher ===");
         for (i, window) in switcher.windows().iter().enumerate() {
             let marker = if i == switcher.current_index() {
                 ">>>"
@@ -247,23 +246,22 @@ impl Daemon {
                 "   "
             };
             let app_id = window.app_id.as_deref().unwrap_or("<unknown>");
-            eprintln!("{} [{}] {} - {}", marker, window.id, app_id, window.title);
+            debug!("{} [{}] {} - {}", marker, window.id, app_id, window.title);
         }
-        eprintln!("=======================\n");
+        debug!("=======================");
     }
 
     fn finalize_selection(&mut self) -> Result<()> {
         info!("Finalizing window selection");
 
         // Take the switcher out, ending switching mode
-        let switcher = match self.switcher.take() {
-            Some(s) => s,
-            None => return Ok(()),
+        let Some(switcher) = self.switcher.take() else {
+            return Ok(());
         };
 
         // Focus the selected window
         if let Some(window) = switcher.current() {
-            eprintln!("SELECTING: {} (ID: {})", window.title, window.id);
+            debug!("Selecting window: {} (ID: {})", window.title, window.id);
             let window_id = window.id;
             self.window_manager.focus_window(window_id)?;
 

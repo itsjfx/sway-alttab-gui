@@ -163,10 +163,7 @@ impl SwitcherWindow {
         info!("Presenting window...");
         self.window.set_visible(true);
         self.window.present();
-        info!(
-            "Window presented, is_visible={}",
-            self.window.is_visible()
-        );
+        info!("Window presented, is_visible={}", self.window.is_visible());
     }
 
     fn create_window_tile(&self, window: &WindowInfo, icon_resolver: &mut IconResolver) -> Widget {
@@ -174,29 +171,17 @@ impl SwitcherWindow {
         vbox.set_margin_start(TILE_PADDING);
         vbox.set_margin_end(TILE_PADDING);
 
-        // Add icon - try app_id first, then window_class as fallback
-        let icon_found =
-            if let Some(pixbuf) = icon_resolver.resolve_icon(window.app_id.as_deref()) {
-                let icon = Image::from_pixbuf(Some(&pixbuf));
-                icon.set_pixel_size(ICON_SIZE);
-                vbox.append(&icon);
-                true
-            } else if let Some(pixbuf) = icon_resolver.resolve_icon(window.window_class.as_deref())
-            {
-                let icon = Image::from_pixbuf(Some(&pixbuf));
-                icon.set_pixel_size(ICON_SIZE);
-                vbox.append(&icon);
-                true
-            } else if let Some(fallback) = icon_resolver.get_fallback_icon() {
-                let icon = Image::from_pixbuf(Some(&fallback));
-                icon.set_pixel_size(ICON_SIZE);
-                vbox.append(&icon);
-                true
-            } else {
-                false
-            };
+        // Add icon - try app_id first, then window_class, then fallback
+        let pixbuf = icon_resolver
+            .resolve_icon(window.app_id.as_deref())
+            .or_else(|| icon_resolver.resolve_icon(window.window_class.as_deref()))
+            .or_else(|| icon_resolver.get_fallback_icon());
 
-        if !icon_found {
+        if let Some(pb) = pixbuf {
+            let icon = Image::from_pixbuf(Some(&pb));
+            icon.set_pixel_size(ICON_SIZE);
+            vbox.append(&icon);
+        } else {
             // Absolute fallback: just a placeholder label
             let placeholder = Label::new(Some("□"));
             placeholder.set_width_request(ICON_SIZE);

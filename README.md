@@ -1,6 +1,6 @@
 # sway-alttab
 
-Windows-style Alt-Tab window switcher for Sway (Wayland compositor).
+Windows-style Alt-Tab window switcher for Sway (Wayland)
 
 ## Features
 
@@ -10,39 +10,6 @@ Windows-style Alt-Tab window switcher for Sway (Wayland compositor).
 - Alt release to select window (via layer-shell keyboard grab)
 - Two modes: current workspace vs all workspaces
 - No special permissions required (no udev rules or input group)
-
-## Dependencies
-
-### Build Dependencies
-
-```bash
-# Arch Linux
-sudo pacman -S gtk4 gtk4-layer-shell
-
-# Other distros: install gtk4 and gtk4-layer-shell development packages
-```
-
-### Runtime Dependencies
-
-- `gtk4`
-- `gtk4-layer-shell`
-- Sway (or compatible Wayland compositor with layer-shell support)
-
-## Building
-
-```bash
-cargo build --release
-```
-
-## Installation
-
-```bash
-# Copy binary to your PATH
-cp target/release/sway-alttab ~/bin/
-
-# Or install via cargo
-cargo install --path .
-```
 
 ## Sway Configuration
 
@@ -56,16 +23,7 @@ exec --no-startup-id sway-alttab daemon
 bindsym Mod1+Tab exec sway-alttab show
 ```
 
-The layer-shell window grabs keyboard exclusively when visible, so:
-- **Tab** cycles forward
-- **Shift+Tab** cycles backward
-- **Alt release** selects the window
-- **Escape** cancels
-- **Enter** also selects
-
 ## Usage
-
-### CLI Commands
 
 ```bash
 sway-alttab [OPTIONS] [COMMAND]
@@ -85,18 +43,39 @@ Options:
   -v, --verbose      Enable verbose logging
 ```
 
-### Examples
+## Dependencies
+
+### Build Dependencies
 
 ```bash
-# Start daemon (usually via sway config)
-sway-alttab daemon
+# Arch Linux
+sudo pacman -S gtk4 gtk4-layer-shell
 
-# Start daemon showing all workspaces
-sway-alttab --mode all daemon
-
-# Manually trigger switcher (usually via keybinding)
-sway-alttab show
+# Other distros: install gtk4 and gtk4-layer-shell development packages
 ```
+
+### Runtime Dependencies
+
+- `gtk4`
+- `gtk4-layer-shell`
+- Sway
+
+## Building
+
+```bash
+cargo build --release
+```
+
+## Installation
+
+```bash
+# Copy binary to your PATH
+cp target/release/sway-alttab ~/bin/
+
+# Or install via cargo
+cargo install --path .
+```
+
 
 ## Architecture
 
@@ -110,16 +89,3 @@ sway-alttab show
 - **CLI**: Sends commands to daemon via socket
 - **Layer-shell**: GTK window grabs keyboard exclusively when visible
 - **IPC**: Simple text protocol over Unix socket at `$XDG_RUNTIME_DIR/sway-alttab.sock`
-
-### Key Files
-
-- `main.rs` - Entry point, CLI dispatch
-- `daemon.rs` - Event loop, window switching state machine
-- `ui.rs` - GTK4 layer-shell window with keyboard handling
-- `socket_server.rs` / `socket_client.rs` - Unix socket IPC
-- `window_manager.rs` - Sway IPC, MRU tracking
-- `icon_resolver.rs` - Desktop file icon resolution
-
-## License
-
-MIT

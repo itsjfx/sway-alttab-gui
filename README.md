@@ -13,6 +13,8 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 * Can display windows from current workspace or all workspaces
 * No special permissions required (no udev rules or input group)
 
+<img width="750" height="247" alt="Preview" src="https://github.com/user-attachments/assets/bf782b77-1633-4328-bf72-5d763f3e40ad" />
+
 ## Quick Start
 
 ### Install

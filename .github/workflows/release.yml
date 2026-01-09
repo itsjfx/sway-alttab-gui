@@ -9,6 +9,9 @@ env:
   CARGO_TERM_COLOR: always
   APP_NAME: sway-alttab-gui
 
+concurrency:
+  group: release
+
 jobs:
   check-version:
     runs-on: ubuntu-latest

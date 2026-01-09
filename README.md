@@ -19,6 +19,8 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 
 If you're using Arch Linux, you can install the packages from the AUR... eventually
 
+For other distros:
+
 1. Install required runtime dependencies
     1. `gtk4`
     2. `gtk4-layer-shell`

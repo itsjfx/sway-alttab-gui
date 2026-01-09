@@ -46,9 +46,9 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
             artifact_name: sway-alttab-gui-linux-amd64
-          # - target: aarch64-unknown-linux-gnu
-          #   runner: ubuntu-24.04-arm
-          #   artifact_name: sway-alttab-linux-arm64
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+            artifact_name: sway-alttab-linux-arm64
 
     runs-on: ${{ matrix.runner }}
     # ubuntu-latest is 24.04 which has no gtk4-layer-shell package

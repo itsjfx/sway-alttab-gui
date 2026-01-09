@@ -1,6 +1,5 @@
 use crate::icon_resolver::{IconResolver, WmClassIndex};
-use crate::ipc::IpcCommand;
-use crate::socket_client;
+use crate::ipc::InputCommand;
 use crate::window_manager::WindowInfo;
 use gtk4::gdk::Key;
 use gtk4::prelude::*;
@@ -9,6 +8,7 @@ use gtk4::{
     Widget,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 const ICON_SIZE: i32 = 64;
@@ -24,8 +24,11 @@ pub struct SwitcherWindow {
     tiles: Vec<Widget>,
 }
 
+/// Sender type for input commands to daemon
+pub type InputSender = mpsc::UnboundedSender<InputCommand>;
+
 impl SwitcherWindow {
-    pub fn new(app: &Application) -> Self {
+    pub fn new(app: &Application, input_tx: InputSender) -> Self {
         let window = ApplicationWindow::builder()
             .application(app)
             .title("Window Switcher")
@@ -48,7 +51,8 @@ impl SwitcherWindow {
 
         // Setup keyboard event controller
         let key_controller = EventControllerKey::new();
-        key_controller.connect_key_pressed(|_controller, keyval, _keycode, state| {
+        let tx_pressed = input_tx.clone();
+        key_controller.connect_key_pressed(move |_controller, keyval, _keycode, state| {
             debug!("Key pressed: {:?}, state: {:?}", keyval, state);
 
             match keyval {
@@ -56,27 +60,27 @@ impl SwitcherWindow {
                     // Check if Shift is held
                     if state.contains(gtk4::gdk::ModifierType::SHIFT_MASK) {
                         debug!("Shift+Tab pressed, sending prev");
-                        send_ipc_command(IpcCommand::Prev);
+                        send_input_command(&tx_pressed, InputCommand::Prev);
                     } else {
                         debug!("Tab pressed, sending next");
-                        send_ipc_command(IpcCommand::Next);
+                        send_input_command(&tx_pressed, InputCommand::Next);
                     }
                     gtk4::glib::Propagation::Stop
                 }
                 Key::ISO_Left_Tab => {
                     // Shift+Tab often generates ISO_Left_Tab
                     debug!("ISO_Left_Tab (Shift+Tab) pressed, sending prev");
-                    send_ipc_command(IpcCommand::Prev);
+                    send_input_command(&tx_pressed, InputCommand::Prev);
                     gtk4::glib::Propagation::Stop
                 }
                 Key::Escape => {
                     debug!("Escape pressed, sending cancel");
-                    send_ipc_command(IpcCommand::Cancel);
+                    send_input_command(&tx_pressed, InputCommand::Cancel);
                     gtk4::glib::Propagation::Stop
                 }
                 Key::Return | Key::KP_Enter => {
                     debug!("Enter pressed, sending select");
-                    send_ipc_command(IpcCommand::Select);
+                    send_input_command(&tx_pressed, InputCommand::Select);
                     gtk4::glib::Propagation::Stop
                 }
                 _ => gtk4::glib::Propagation::Proceed,
@@ -84,13 +88,14 @@ impl SwitcherWindow {
         });
 
         // Detect Alt release
-        key_controller.connect_key_released(|_controller, keyval, _keycode, _state| {
+        let tx_released = input_tx;
+        key_controller.connect_key_released(move |_controller, keyval, _keycode, _state| {
             debug!("Key released: {:?}", keyval);
 
             match keyval {
                 Key::Alt_L | Key::Alt_R => {
                     debug!("Alt released, sending select");
-                    send_ipc_command(IpcCommand::Select);
+                    send_input_command(&tx_released, InputCommand::Select);
                 }
                 _ => {}
             }
@@ -208,10 +213,10 @@ impl SwitcherWindow {
         tile.remove_css_class("selected");
     }
 
-    /// Cycle through windows in the given direction
-    /// forward=true cycles to the next window, forward=false cycles to the previous
-    fn cycle(&mut self, forward: bool) {
-        if self.windows.is_empty() {
+    /// Set the selection to a specific index
+    /// (daemon owns the authoritative selection state, UI just reflects it)
+    pub fn set_selection(&mut self, new_index: usize) {
+        if self.windows.is_empty() || new_index >= self.windows.len() {
             return;
         }
 
@@ -220,15 +225,8 @@ impl SwitcherWindow {
             self.unhighlight_tile(current_tile);
         }
 
-        // Update index with wraparound
-        let len = self.windows.len();
-        self.current_index = if forward {
-            (self.current_index + 1) % len
-        } else if self.current_index == 0 {
-            len - 1
-        } else {
-            self.current_index - 1
-        };
+        // Update index
+        self.current_index = new_index;
 
         // Highlight new selection
         if let Some(new_tile) = self.tiles.get(self.current_index) {
@@ -236,19 +234,9 @@ impl SwitcherWindow {
         }
 
         debug!(
-            "Cycled to window {}: {:?}",
+            "Selection updated to window {}: {:?}",
             self.current_index, self.windows[self.current_index].title
         );
-    }
-
-    /// Cycle to next window
-    pub fn cycle_next(&mut self) {
-        self.cycle(true);
-    }
-
-    /// Cycle to previous window
-    pub fn cycle_prev(&mut self) {
-        self.cycle(false);
     }
 
     /// Close the window switcher
@@ -258,14 +246,11 @@ impl SwitcherWindow {
     }
 }
 
-/// Send an IPC command to the daemon
-fn send_ipc_command(cmd: IpcCommand) {
-    // Spawn in a thread to avoid blocking GTK main loop
-    std::thread::spawn(move || {
-        if let Err(e) = socket_client::send_command(cmd) {
-            warn!("Failed to send IPC command: {}", e);
-        }
-    });
+/// Send an input command to the daemon via channel
+fn send_input_command(tx: &InputSender, cmd: InputCommand) {
+    if let Err(e) = tx.send(cmd) {
+        warn!("Failed to send input command: {}", e);
+    }
 }
 
 fn truncate_string(s: &str, max_chars: usize) -> String {
@@ -304,4 +289,70 @@ pub fn setup_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate_string_short() {
+        assert_eq!(truncate_string("hello", 20), "hello");
+    }
+
+    #[test]
+    fn test_truncate_string_exact_length() {
+        let s = "12345678901234567890"; // exactly 20 chars
+        assert_eq!(truncate_string(s, 20), s);
+    }
+
+    #[test]
+    fn test_truncate_string_long() {
+        let s = "this is a very long window title";
+        let result = truncate_string(s, 10);
+        assert_eq!(result, "this is...");
+        assert_eq!(result.chars().count(), 10);
+    }
+
+    #[test]
+    fn test_truncate_string_unicode() {
+        // Unicode characters should count as 1 char each
+        let s = "日本語テストタイトル";
+        let result = truncate_string(s, 5);
+        assert_eq!(result, "日本...");
+        assert_eq!(result.chars().count(), 5);
+    }
+
+    #[test]
+    fn test_truncate_string_empty() {
+        assert_eq!(truncate_string("", 20), "");
+    }
+
+    #[test]
+    fn test_truncate_string_one_char() {
+        assert_eq!(truncate_string("a", 20), "a");
+    }
+
+    #[test]
+    fn test_truncate_string_exactly_max_plus_one() {
+        let s = "123456789012345678901"; // 21 chars
+        let result = truncate_string(s, 20);
+        assert_eq!(result, "12345678901234567...");
+        assert_eq!(result.chars().count(), 20);
+    }
+
+    #[test]
+    fn test_truncate_string_very_short_max() {
+        // Edge case: max is 3, so only ellipsis fits
+        let result = truncate_string("hello", 3);
+        assert_eq!(result, "...");
+    }
+
+    #[test]
+    fn test_truncate_string_max_less_than_3() {
+        // Edge case: max is less than ellipsis length
+        // saturating_sub prevents underflow
+        let result = truncate_string("hello", 2);
+        assert_eq!(result, "...");
+    }
 }

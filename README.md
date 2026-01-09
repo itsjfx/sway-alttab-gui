@@ -2,13 +2,15 @@
 
 Windows-style Alt-Tab window switcher for Sway (Wayland)
 
+If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is for you.
+
 ## Features
 
 - GTK4 visual window switcher with icons
 - MRU (Most Recently Used) window ordering
 - Alt+Tab to cycle forward, Shift+Tab to cycle backward
-- Alt release to select window (via layer-shell keyboard grab)
-- Two modes: current workspace vs all workspaces
+- Alt release to select window
+- Can display windows from current workspace or all workspaces
 - No special permissions required (no udev rules or input group)
 
 ## Sway Configuration
@@ -31,12 +33,6 @@ sway-alttab [OPTIONS] [COMMAND]
 Commands:
   daemon    Run as daemon (default)
   show      Show the window switcher
-  next      Cycle to next window
-  prev      Cycle to previous window
-  select    Select current window
-  cancel    Cancel without selecting
-  status    Query daemon status
-  shutdown  Shutdown the daemon
 
 Options:
   -m, --mode <MODE>  Workspace filter [default: current] [values: current, all]
@@ -75,17 +71,3 @@ cp target/release/sway-alttab ~/bin/
 # Or install via cargo
 cargo install --path .
 ```
-
-
-## Architecture
-
-```
-[Sway keybinding] → [CLI: sway-alttab show] → [Unix socket] → [Daemon] → [GTK UI]
-                                                    ↑
-[GTK keyboard events] → [CLI: sway-alttab next/select] ─┘
-```
-
-- **Daemon**: Runs GTK application, listens on Unix socket for commands
-- **CLI**: Sends commands to daemon via socket
-- **Layer-shell**: GTK window grabs keyboard exclusively when visible
-- **IPC**: Simple text protocol over Unix socket at `$XDG_RUNTIME_DIR/sway-alttab.sock`

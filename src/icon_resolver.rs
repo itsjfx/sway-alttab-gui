@@ -3,28 +3,31 @@ use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::gio::prelude::FileExt;
 use gtk4::IconLookupFlags;
 use gtk4::IconTheme;
-use lazy_static::lazy_static;
+use lru::LruCache;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::num::NonZeroUsize;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
 use tracing::{debug, info, warn};
 
-lazy_static! {
-    /// Cached XDG application directories plus flatpak locations.
-    /// Computed once at first access.
-    static ref APPLICATION_DIRS: Vec<PathBuf> = {
-        [
-            dirs::data_local_dir().map(|d| d.join("applications")),
-            Some(PathBuf::from("/usr/share/applications")),
-            Some(PathBuf::from("/usr/local/share/applications")),
-            Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
-            dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
-        ]
-        .into_iter()
-        .flatten()
-        .collect()
-    };
-}
+/// Maximum number of entries in the desktop file cache.
+/// This prevents unbounded memory growth if many different apps are used.
+const DESKTOP_FILE_CACHE_SIZE: usize = 256;
+
+/// Cached XDG application directories plus flatpak locations.
+/// Computed once at first access.
+static APPLICATION_DIRS: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
+    [
+        dirs::data_local_dir().map(|d| d.join("applications")),
+        Some(PathBuf::from("/usr/share/applications")),
+        Some(PathBuf::from("/usr/local/share/applications")),
+        Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
+        dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+});
 
 /// A pre-built index mapping StartupWMClass values to desktop file paths.
 /// This allows resolving icons for apps like Signal where app_id ("signal")
@@ -33,8 +36,10 @@ pub type WmClassIndex = Arc<HashMap<String, PathBuf>>;
 
 pub struct IconResolver {
     icon_theme: IconTheme,
-    desktop_file_cache: HashMap<String, Option<String>>, // app_id -> icon_name
-    wmclass_index: WmClassIndex,                          // StartupWMClass -> desktop file path
+    /// LRU cache for desktop file lookups: app_id -> icon_name
+    /// Bounded to prevent unbounded memory growth
+    desktop_file_cache: LruCache<String, Option<String>>,
+    wmclass_index: WmClassIndex, // StartupWMClass -> desktop file path
     icon_size: i32,
 }
 
@@ -42,10 +47,12 @@ impl IconResolver {
     /// Create an IconResolver with a pre-built WMClass index
     pub fn with_wmclass_index(icon_size: i32, wmclass_index: WmClassIndex) -> Self {
         let icon_theme = IconTheme::new();
+        let cache_size =
+            NonZeroUsize::new(DESKTOP_FILE_CACHE_SIZE).expect("cache size must be non-zero");
 
         IconResolver {
             icon_theme,
-            desktop_file_cache: HashMap::new(),
+            desktop_file_cache: LruCache::new(cache_size),
             wmclass_index,
             icon_size,
         }
@@ -68,14 +75,13 @@ impl IconResolver {
 
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map(|e| e == "desktop").unwrap_or(false) {
-                    if let Some((wmclass, desktop_path)) = Self::extract_wmclass(&path) {
+                if path.extension().is_some_and(|e| e == "desktop")
+                    && let Some((wmclass, desktop_path)) = Self::extract_wmclass(&path) {
                         // Store lowercase key for case-insensitive matching
                         let key = wmclass.to_lowercase();
                         // First match wins (don't overwrite)
                         index.entry(key).or_insert(desktop_path);
                     }
-                }
             }
         }
 
@@ -84,32 +90,30 @@ impl IconResolver {
     }
 
     /// Extract StartupWMClass from a desktop file
-    fn extract_wmclass(path: &PathBuf) -> Option<(String, PathBuf)> {
+    fn extract_wmclass(path: &Path) -> Option<(String, PathBuf)> {
         let bytes = std::fs::read(path).ok()?;
         let content = String::from_utf8(bytes).ok()?;
         let entry = DesktopEntry::decode(path, &content).ok()?;
 
-        entry.startup_wm_class().map(|wm| (wm.to_string(), path.clone()))
+        entry.startup_wm_class().map(|wm| (wm.to_string(), path.to_path_buf()))
     }
 
     /// Resolve icon for an application ID
     pub fn resolve_icon(&mut self, app_id: Option<&str>) -> Option<Pixbuf> {
         let app_id = app_id?;
 
-        // Check cache first
-        if let Some(cached) = self.desktop_file_cache.get(app_id) {
-            if let Some(icon_name) = cached {
-                return self.load_icon_by_name(icon_name);
-            } else {
-                return None;
-            }
+        // Check LRU cache first (also promotes to most-recently-used)
+        // Clone the cached value to release the mutable borrow before calling load_icon_by_name
+        if let Some(cached) = self.desktop_file_cache.get(app_id).cloned() {
+            return cached.and_then(|name| self.load_icon_by_name(&name));
         }
 
         // Try to find desktop file
         let icon_name = self.find_icon_from_desktop_file(app_id);
 
-        // Cache the result
-        self.desktop_file_cache.insert(app_id.to_string(), icon_name.clone());
+        // Cache the result in LRU cache (evicts oldest if at capacity)
+        self.desktop_file_cache
+            .put(app_id.to_string(), icon_name.clone());
 
         // Load icon if found
         icon_name.and_then(|name| self.load_icon_by_name(&name))
@@ -189,17 +193,15 @@ impl IconResolver {
             };
             for entry in entries.flatten() {
                 let path = entry.path();
-                if let Some(filename) = path.file_name() {
-                    if filename.to_string_lossy().to_lowercase() == target {
-                        if let Some(icon) = self.parse_desktop_file(&path) {
+                if let Some(filename) = path.file_name()
+                    && filename.to_string_lossy().to_lowercase() == target
+                        && let Some(icon) = self.parse_desktop_file(&path) {
                             debug!(
                                 "Found icon '{}' for app_id '{}' (case-insensitive) in {:?}",
                                 icon, app_id, path
                             );
                             return Some(icon);
                         }
-                    }
-                }
             }
         }
         None
@@ -232,7 +234,7 @@ impl IconResolver {
     }
 
     /// Parse desktop file and extract Icon field
-    fn parse_desktop_file(&self, path: &PathBuf) -> Option<String> {
+    fn parse_desktop_file(&self, path: &Path) -> Option<String> {
         let bytes = std::fs::read(path).ok()?;
         let content = String::from_utf8(bytes).ok()?;
         let entry = DesktopEntry::decode(path, &content).ok()?;
@@ -255,8 +257,8 @@ impl IconResolver {
         // Try to get the file and load as pixbuf
         if let Some(file) = paintable.file() {
             // In GTK4, get path from URI
-            if let Some(path_str) = file.path() {
-                if let Ok(pixbuf) = Pixbuf::from_file_at_scale(
+            if let Some(path_str) = file.path()
+                && let Ok(pixbuf) = Pixbuf::from_file_at_scale(
                     &path_str,
                     self.icon_size,
                     self.icon_size,
@@ -264,7 +266,6 @@ impl IconResolver {
                 ) {
                     return Some(pixbuf);
                 }
-            }
         }
 
         // Try loading directly as a file path (absolute icon paths)
@@ -474,5 +475,60 @@ Exec=signal-desktop
         } else {
             println!("Skipping test: no PNG icons found in /usr/share/pixmaps");
         }
+    }
+
+    #[test]
+    fn test_lru_cache_size_constant() {
+        // Verify the cache size constant is reasonable
+        assert!(DESKTOP_FILE_CACHE_SIZE > 0);
+        assert!(DESKTOP_FILE_CACHE_SIZE >= 64); // At least handle a typical number of apps
+        assert!(DESKTOP_FILE_CACHE_SIZE <= 1024); // But not excessively large
+    }
+
+    #[test]
+    fn test_lru_cache_eviction() {
+        use std::num::NonZeroUsize;
+
+        // Create a small LRU cache to test eviction
+        let mut cache: LruCache<String, Option<String>> =
+            LruCache::new(NonZeroUsize::new(2).unwrap());
+
+        // Add two entries
+        cache.put("app1".to_string(), Some("icon1".to_string()));
+        cache.put("app2".to_string(), Some("icon2".to_string()));
+
+        // Both should be present
+        assert!(cache.get("app1").is_some());
+        assert!(cache.get("app2").is_some());
+
+        // Add a third entry - should evict the least recently used (app1, since we just accessed app2)
+        cache.put("app3".to_string(), Some("icon3".to_string()));
+
+        // app1 should be evicted (it was accessed before app2)
+        assert!(cache.get("app1").is_none());
+        assert!(cache.get("app2").is_some());
+        assert!(cache.get("app3").is_some());
+    }
+
+    #[test]
+    fn test_lru_cache_get_promotes_entry() {
+        use std::num::NonZeroUsize;
+
+        let mut cache: LruCache<String, Option<String>> =
+            LruCache::new(NonZeroUsize::new(2).unwrap());
+
+        cache.put("app1".to_string(), Some("icon1".to_string()));
+        cache.put("app2".to_string(), Some("icon2".to_string()));
+
+        // Access app1 to promote it to most recently used
+        let _ = cache.get("app1");
+
+        // Add app3 - should evict app2 (now least recently used)
+        cache.put("app3".to_string(), Some("icon3".to_string()));
+
+        // app2 should be evicted, app1 should still be present
+        assert!(cache.get("app1").is_some());
+        assert!(cache.get("app2").is_none());
+        assert!(cache.get("app3").is_some());
     }
 }

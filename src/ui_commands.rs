@@ -10,10 +10,9 @@ pub enum UiCommand {
         initial_index: usize,
         wmclass_index: WmClassIndex,
     },
-    /// Cycle to next window
-    CycleNext,
-    /// Cycle to previous window
-    CyclePrev,
+    /// Update the selected window to the given index
+    /// (daemon owns the authoritative selection state)
+    UpdateSelection { index: usize },
     /// Hide the window switcher
     Hide,
 }

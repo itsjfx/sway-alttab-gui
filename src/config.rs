@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand, ValueEnum};
-use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
 pub enum WorkspaceMode {
     /// Show windows from current workspace only
     #[default]
@@ -16,18 +15,6 @@ pub enum Command {
     Daemon,
     /// Show the window switcher
     Show,
-    /// Cycle to next window
-    Next,
-    /// Cycle to previous window
-    Prev,
-    /// Select current window and close switcher
-    Select,
-    /// Cancel switching without selecting
-    Cancel,
-    /// Query daemon status
-    Status,
-    /// Shutdown the daemon
-    Shutdown,
 }
 
 #[derive(Debug, Clone, Parser)]
@@ -53,7 +40,65 @@ impl Config {
     }
 
     /// Get the command, defaulting to Daemon if none specified
+    #[must_use]
     pub fn command(&self) -> Command {
         self.command.clone().unwrap_or(Command::Daemon)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_workspace_mode_default() {
+        assert_eq!(WorkspaceMode::default(), WorkspaceMode::Current);
+    }
+
+    #[test]
+    fn test_command_default_is_daemon() {
+        let config = Config {
+            mode: WorkspaceMode::default(),
+            verbose: false,
+            command: None,
+        };
+        assert!(matches!(config.command(), Command::Daemon));
+    }
+
+    #[test]
+    fn test_command_show_when_specified() {
+        let config = Config {
+            mode: WorkspaceMode::default(),
+            verbose: false,
+            command: Some(Command::Show),
+        };
+        assert!(matches!(config.command(), Command::Show));
+    }
+
+    #[test]
+    fn test_command_daemon_when_specified() {
+        let config = Config {
+            mode: WorkspaceMode::default(),
+            verbose: false,
+            command: Some(Command::Daemon),
+        };
+        assert!(matches!(config.command(), Command::Daemon));
+    }
+
+    #[test]
+    fn test_workspace_mode_all() {
+        let mode = WorkspaceMode::All;
+        assert_eq!(mode, WorkspaceMode::All);
+        assert_ne!(mode, WorkspaceMode::Current);
+    }
+
+    #[test]
+    fn test_config_verbose_flag() {
+        let config = Config {
+            mode: WorkspaceMode::Current,
+            verbose: true,
+            command: None,
+        };
+        assert!(config.verbose);
     }
 }

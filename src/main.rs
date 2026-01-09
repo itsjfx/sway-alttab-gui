@@ -2,8 +2,6 @@ mod config;
 mod daemon;
 mod icon_resolver;
 mod ipc;
-mod socket_client;
-mod socket_server;
 mod sway_client;
 mod ui;
 mod ui_commands;
@@ -16,7 +14,6 @@ use config::{Command, Config};
 use daemon::Daemon;
 use gtk4::prelude::*;
 use icon_resolver::{IconResolver, WmClassIndex};
-use ipc::IpcCommand;
 use std::cell::RefCell;
 use std::fs;
 use std::path::PathBuf;
@@ -35,37 +32,49 @@ fn get_pidfile_path() -> Result<PathBuf> {
     Ok(runtime_dir.join("sway-alttab.pid"))
 }
 
-/// Check if another instance is already running
-fn check_pidfile() -> Result<()> {
+/// Read the PID from the pidfile if it exists.
+/// Returns Ok(None) if no pidfile exists, Ok(Some(pid)) if valid.
+fn read_pidfile() -> Result<Option<i32>> {
     let pidfile = get_pidfile_path()?;
 
-    if pidfile.exists() {
-        // Read the PID from the file
-        let pid_str = fs::read_to_string(&pidfile).context("Failed to read pidfile")?;
-        let pid: u32 = pid_str.trim().parse().context("Invalid PID in pidfile")?;
+    if !pidfile.exists() {
+        return Ok(None);
+    }
 
-        // Check if the process is still running
-        if process_exists(pid) {
-            anyhow::bail!(
-                "Another instance of sway-alttab is already running (PID: {}). \
-                 If this is incorrect, remove the pidfile at: {}",
-                pid,
-                pidfile.display()
-            );
-        } else {
-            // Stale pidfile, remove it
-            info!("Removing stale pidfile (PID {} not found)", pid);
-            if let Err(e) = fs::remove_file(&pidfile) {
-                tracing::warn!("Failed to remove stale pidfile: {}", e);
-            }
-        }
+    let pid_str = fs::read_to_string(&pidfile).context("Failed to read pidfile")?;
+    let pid: i32 = pid_str.trim().parse().context("Invalid PID in pidfile")?;
+
+    Ok(Some(pid))
+}
+
+/// Check if another instance is already running
+fn check_pidfile() -> Result<()> {
+    let Some(pid) = read_pidfile()? else {
+        return Ok(());
+    };
+
+    if process_exists(pid) {
+        let pidfile = get_pidfile_path()?;
+        anyhow::bail!(
+            "Another instance of sway-alttab is already running (PID: {}). \
+             If this is incorrect, remove the pidfile at: {}",
+            pid,
+            pidfile.display()
+        );
+    }
+
+    // Stale pidfile, remove it
+    info!("Removing stale pidfile (PID {} not found)", pid);
+    let pidfile = get_pidfile_path()?;
+    if let Err(e) = fs::remove_file(&pidfile) {
+        tracing::warn!("Failed to remove stale pidfile: {}", e);
     }
 
     Ok(())
 }
 
 /// Check if a process with the given PID exists
-fn process_exists(pid: u32) -> bool {
+fn process_exists(pid: i32) -> bool {
     // Check if /proc/<pid> exists (Linux-specific, but this is for Sway which is Linux-only)
     PathBuf::from(format!("/proc/{}", pid)).exists()
 }
@@ -116,24 +125,29 @@ fn main() -> Result<()> {
     // Dispatch based on command
     match config.command() {
         Command::Daemon => run_daemon_mode(config),
-        Command::Show => socket_client::send_command_and_exit(IpcCommand::Show),
-        Command::Next => socket_client::send_command_and_exit(IpcCommand::Next),
-        Command::Prev => socket_client::send_command_and_exit(IpcCommand::Prev),
-        Command::Select => socket_client::send_command_and_exit(IpcCommand::Select),
-        Command::Cancel => socket_client::send_command_and_exit(IpcCommand::Cancel),
-        Command::Status => socket_client::send_command_and_exit(IpcCommand::Status),
-        Command::Shutdown => socket_client::send_command_and_exit(IpcCommand::Shutdown),
+        Command::Show => send_show_signal(),
     }
 }
 
-fn run_daemon_mode(config: Config) -> Result<()> {
-    // Ignore SIGUSR1 signal to prevent crashes
-    #[cfg(unix)]
-    unsafe {
-        use libc::{signal, SIGUSR1, SIG_IGN};
-        signal(SIGUSR1, SIG_IGN);
-    }
+/// Send SIGUSR1 to the running daemon to trigger the window switcher
+fn send_show_signal() -> Result<()> {
+    use nix::sys::signal::{kill, Signal};
+    use nix::unistd::Pid;
 
+    let Some(pid) = read_pidfile()? else {
+        let pidfile = get_pidfile_path()?;
+        anyhow::bail!(
+            "Daemon is not running (pidfile not found at {})",
+            pidfile.display()
+        );
+    };
+
+    // Send SIGUSR1 to the daemon process using nix crate
+    kill(Pid::from_raw(pid), Signal::SIGUSR1)
+        .with_context(|| format!("Failed to send signal to daemon (PID {})", pid))
+}
+
+fn run_daemon_mode(config: Config) -> Result<()> {
     info!("Starting sway-alttab daemon with GTK UI");
     info!("Workspace mode: {:?}", config.mode);
 
@@ -174,14 +188,15 @@ fn run_daemon_mode(config: Config) -> Result<()> {
         // Setup CSS
         ui::setup_css();
 
-        // Create SwitcherWindow
-        let switcher = Rc::new(RefCell::new(SwitcherWindow::new(app)));
+        // Create channels for daemon communication
+        let (ui_cmd_tx, ui_cmd_rx) = mpsc::unbounded_channel();
+        let (input_cmd_tx, input_cmd_rx) = mpsc::unbounded_channel();
+
+        // Create SwitcherWindow with input channel
+        let switcher = Rc::new(RefCell::new(SwitcherWindow::new(app, input_cmd_tx)));
 
         // Pre-realize window to avoid slow first show
         switcher.borrow().warm_up();
-
-        // Create channels for UI communication
-        let (ui_cmd_tx, ui_cmd_rx) = mpsc::unbounded_channel();
 
         // Setup UI command handler
         ui_handler::handle_ui_commands(switcher.clone(), ui_cmd_rx);
@@ -195,7 +210,7 @@ fn run_daemon_mode(config: Config) -> Result<()> {
 
             // Run daemon in Tokio runtime
             rt.block_on(async move {
-                match run_daemon_async(config_clone, ui_cmd_tx, wmclass_index_for_daemon).await {
+                match run_daemon_async(config_clone, ui_cmd_tx, input_cmd_rx, wmclass_index_for_daemon).await {
                     Ok(_) => {
                         info!("Daemon exited normally");
                     }
@@ -215,19 +230,17 @@ fn run_daemon_mode(config: Config) -> Result<()> {
     Ok(())
 }
 
-/// Run the async daemon logic with socket IPC
+/// Run the async daemon logic
 async fn run_daemon_async(
     config: Config,
     ui_cmd_tx: mpsc::UnboundedSender<ui_commands::UiCommand>,
+    input_cmd_rx: mpsc::UnboundedReceiver<ipc::InputCommand>,
     wmclass_index: WmClassIndex,
 ) -> Result<()> {
-    // Start IPC socket server
-    let (ipc_rx, _socket_guard) = socket_server::start_server().await?;
-
     // Create and run daemon
     let daemon = Daemon::new(config, Some(ui_cmd_tx), wmclass_index)?;
     info!("Starting daemon event loop");
-    daemon.run(ipc_rx).await?;
+    daemon.run(input_cmd_rx).await?;
 
     Ok(())
 }

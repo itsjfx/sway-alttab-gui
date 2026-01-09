@@ -27,13 +27,9 @@ pub fn handle_ui_commands(
                     switcher.borrow_mut().show(windows, initial_index, wmclass_index);
                     info!("UI shown");
                 }
-                UiCommand::CycleNext => {
-                    info!("Cycling to next window");
-                    switcher.borrow_mut().cycle_next();
-                }
-                UiCommand::CyclePrev => {
-                    info!("Cycling to previous window");
-                    switcher.borrow_mut().cycle_prev();
+                UiCommand::UpdateSelection { index } => {
+                    info!("Updating selection to index {}", index);
+                    switcher.borrow_mut().set_selection(index);
                 }
                 UiCommand::Hide => {
                     info!("Hiding UI");

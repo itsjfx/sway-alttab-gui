@@ -1,10 +1,10 @@
 [package]
-name = "sway-alttab"
+name = "sway-alttab-gui"
 version = "0.1.0"
 edition = "2024"
 description = "Windows-style Alt+Tab window switcher for Sway"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/itsjfx/sway-alttab-gui"
+repository = "https://github.com/itsjfx/sway-alttab-gui-gui"
 keywords = ["sway", "wayland", "window-switcher", "alt-tab"]
 categories = ["gui"]
 readme = "README.md"

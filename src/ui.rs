@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
 const ICON_SIZE: i32 = 64;
-const WINDOW_PADDING: i32 = 20;
+const WINDOW_PADDING: i32 = 25;
 const TILE_PADDING: i32 = 10;
 const MAX_TITLE_LENGTH: usize = 20;
 
@@ -32,8 +32,8 @@ impl SwitcherWindow {
         let window = ApplicationWindow::builder()
             .application(app)
             .title("Window Switcher")
-            .default_width(600)
-            .default_height(150)
+            .default_width(ICON_SIZE + WINDOW_PADDING + TILE_PADDING)
+            .default_height(ICON_SIZE + WINDOW_PADDING + TILE_PADDING + 56)
             .decorated(false)
             .resizable(false)
             .build();
@@ -273,13 +273,8 @@ pub fn setup_css() {
     // Minimal CSS - inherit colors from the user's GTK theme
     provider.load_from_data(
         r#"
-        window {
-            border-radius: 10px;
-        }
-
         .selected {
             background-color: alpha(@theme_selected_bg_color, 0.7);
-            border-radius: 8px;
         }
         "#,
     );

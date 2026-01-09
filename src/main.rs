@@ -29,7 +29,7 @@ fn get_pidfile_path() -> Result<PathBuf> {
         .or_else(dirs::cache_dir)
         .context("Could not determine runtime directory")?;
 
-    Ok(runtime_dir.join("sway-alttab.pid"))
+    Ok(runtime_dir.join("sway-alttab-gui.pid"))
 }
 
 /// Read the PID from the pidfile if it exists.
@@ -56,7 +56,7 @@ fn check_pidfile() -> Result<()> {
     if process_exists(pid) {
         let pidfile = get_pidfile_path()?;
         anyhow::bail!(
-            "Another instance of sway-alttab is already running (PID: {}). \
+            "Another instance of sway-alttab-gui is already running (PID: {}). \
              If this is incorrect, remove the pidfile at: {}",
             pid,
             pidfile.display()
@@ -148,7 +148,7 @@ fn send_show_signal() -> Result<()> {
 }
 
 fn run_daemon_mode(config: Config) -> Result<()> {
-    info!("Starting sway-alttab daemon with GTK UI");
+    info!("Starting sway-alttab-gui daemon with GTK UI");
     info!("Workspace mode: {:?}", config.mode);
 
     // Check if another instance is already running
@@ -180,7 +180,7 @@ fn run_daemon_mode(config: Config) -> Result<()> {
 
     // Create GTK Application
     let app = gtk4::Application::builder()
-        .application_id("com.github.itsjfx.sway-alttab-gui")
+        .application_id("com.github.itsjfx.sway-alttab-gui-gui")
         .build();
 
     let wmclass_index_clone = wmclass_index.clone();

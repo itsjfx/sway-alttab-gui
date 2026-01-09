@@ -1,4 +1,4 @@
-# sway-alttab
+# sway-alttab-gui
 
 Windows-style Alt-Tab window switcher for Sway (Wayland)
 
@@ -6,68 +6,34 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 
 ## Features
 
-- GTK4 visual window switcher with icons
-- MRU (Most Recently Used) window ordering
-- Alt+Tab to cycle forward, Shift+Tab to cycle backward
-- Alt release to select window
-- Can display windows from current workspace or all workspaces
-- No special permissions required (no udev rules or input group)
+* GTK4 visual window switcher with icons
+* MRU (Most Recently Used) window ordering
+* Alt+Tab to cycle forward, Shift+Tab to cycle backward
+* Alt release to select window
+* Can display windows from current workspace or all workspaces
+* No special permissions required (no udev rules or input group)
 
-## Sway Configuration
+## Quick Start
 
-Add to your `~/.config/sway/config`:
+### Install
 
-```bash
-# Start the daemon on Sway startup
-exec --no-startup-id sway-alttab daemon
+If you're using Arch Linux, you can install the packages from the AUR... eventually
 
-# Bind Alt+Tab to show the switcher
-bindsym Mod1+Tab exec sway-alttab show
-```
+1. Install required runtime dependencies
+    a. `gtk4`
+    b. `gtk4-layer-shell`
+    c. Sway (duh)
+2. Download the binary from GitHub releases or build from source with `cargo build --release`
 
-## Usage
-
-```bash
-sway-alttab [OPTIONS] [COMMAND]
-
-Commands:
-  daemon    Run as daemon (default)
-  show      Show the window switcher
-
-Options:
-  -m, --mode <MODE>  Workspace filter [default: current] [values: current, all]
-  -v, --verbose      Enable verbose logging
-```
-
-## Dependencies
-
-### Build Dependencies
+### Configuration
 
 ```bash
-# Arch Linux
-sudo pacman -S gtk4 gtk4-layer-shell
-
-# Other distros: install gtk4 and gtk4-layer-shell development packages
+exec --no-startup-id sway-alttab-gui daemon
+bindsym Mod1+Tab exec sway-alttab-gui show
 ```
 
-### Runtime Dependencies
+For first time usage: reload your Sway configuration and run the daemon manually with `sway-alttab-gui daemon`
 
-- `gtk4`
-- `gtk4-layer-shell`
-- Sway
-
-## Building
-
-```bash
-cargo build --release
-```
-
-## Installation
-
-```bash
-# Copy binary to your PATH
-cp target/release/sway-alttab ~/bin/
-
-# Or install via cargo
-cargo install --path .
-```
+`sway-alttab-gui daemon` can optionally take:
+* `--mode all`: to list windows across all workspaces
+* `--verbose`: to enable verbose logging

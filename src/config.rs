@@ -18,7 +18,7 @@ pub enum Command {
 }
 
 #[derive(Debug, Clone, Parser)]
-#[command(name = "sway-alttab")]
+#[command(name = "sway-alttab-gui")]
 #[command(about = "Windows-style Alt-Tab window switcher for Sway", long_about = None)]
 pub struct Config {
     /// Workspace filtering mode (only applies to daemon mode)

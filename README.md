@@ -20,9 +20,9 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 If you're using Arch Linux, you can install the packages from the AUR... eventually
 
 1. Install required runtime dependencies
-    a. `gtk4`
-    b. `gtk4-layer-shell`
-    c. Sway (duh)
+  1. `gtk4`
+  2. `gtk4-layer-shell`
+  3. Sway (duh)
 2. Download the binary from GitHub releases or build from source with `cargo build --release`
 
 ### Configuration

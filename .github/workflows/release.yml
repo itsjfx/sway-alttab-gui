@@ -14,9 +14,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       should-release: ${{ steps.check.outputs.should-release }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check if release exists
         id: check
@@ -28,6 +29,7 @@ jobs:
             echo "should-release=0" >> "$GITHUB_OUTPUT"
           else
             echo "should-release=1" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
   build:
@@ -45,11 +47,12 @@ jobs:
           #   artifact_name: sway-alttab-linux-arm64
 
     runs-on: ${{ matrix.runner }}
+    # ubuntu-latest is 24.04 which has no gtk4-layer-shell package
     container: ubuntu:26.04
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install dependencies
         run: |
@@ -67,10 +70,10 @@ jobs:
           mkdir -p dist
           cp "target/release/$APP_NAME" "dist/$ARTIFACT_NAME"
           cd dist
-          sha256sum "$ARTIFACT_NAME" > "$ARTIFACT_NAME".sha256
+          sha256sum "$ARTIFACT_NAME" >"$ARTIFACT_NAME".sha256
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: dist/*
@@ -86,10 +89,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts
 
@@ -97,11 +100,8 @@ jobs:
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          # Flatten artifacts
-          ls -la artifacts/
           mkdir -p release
           find artifacts -type f -exec cp {} release/ \;
-          ls -la release/
 
           # Create release
           gh release create "v$VERSION" \

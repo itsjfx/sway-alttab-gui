@@ -19,7 +19,10 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 
 ### Install
 
-If you're using Arch Linux, you can install the packages from the AUR... eventually
+If you're using Arch Linux, you can install from the AUR:
+
+* [sway-alttab-gui-bin](https://aur.archlinux.org/packages/sway-alttab-gui-bin)
+* No DIY build from source package yet (can be added and maintained on request)
 
 For other distros:
 

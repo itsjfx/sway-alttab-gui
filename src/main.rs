@@ -10,7 +10,7 @@ mod window_manager;
 mod window_switcher;
 
 use anyhow::{Context, Result};
-use config::{Command, Config};
+use config::Config;
 use daemon::Daemon;
 use gtk4::prelude::*;
 use icon_resolver::{IconResolver, WmClassIndex};
@@ -111,7 +111,7 @@ fn main() -> Result<()> {
     let config = Config::parse();
 
     // Initialize logging
-    let log_level = if config.verbose {
+    let log_level = if config.verbose() {
         tracing::Level::DEBUG
     } else {
         tracing::Level::INFO
@@ -123,9 +123,10 @@ fn main() -> Result<()> {
         .init();
 
     // Dispatch based on command
-    match config.command() {
-        Command::Daemon => run_daemon_mode(config),
-        Command::Show => send_show_signal(),
+    if config.is_show() {
+        send_show_signal()
+    } else {
+        run_daemon_mode(config)
     }
 }
 
@@ -149,7 +150,7 @@ fn send_show_signal() -> Result<()> {
 
 fn run_daemon_mode(config: Config) -> Result<()> {
     info!("Starting sway-alttab-gui daemon with GTK UI");
-    info!("Workspace mode: {:?}", config.mode);
+    info!("Workspace mode: {:?}", config.mode());
 
     // Check if another instance is already running
     check_pidfile()?;

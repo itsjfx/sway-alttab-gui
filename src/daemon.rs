@@ -195,7 +195,7 @@ impl Daemon {
         self.window_manager.refresh()?;
 
         // Get filtered windows
-        let windows = self.window_manager.get_filtered_windows(self.config.mode);
+        let windows = self.window_manager.get_filtered_windows(self.config.mode());
 
         if windows.is_empty() {
             info!("No windows to switch to");

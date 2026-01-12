@@ -2,6 +2,7 @@ mod config;
 mod daemon;
 mod icon_resolver;
 mod ipc;
+mod pidfile;
 mod sway_client;
 mod ui;
 mod ui_commands;
@@ -14,97 +15,12 @@ use config::Config;
 use daemon::Daemon;
 use gtk4::prelude::*;
 use icon_resolver::{IconResolver, WmClassIndex};
+use pidfile::Pidfile;
 use std::cell::RefCell;
-use std::fs;
-use std::path::PathBuf;
 use std::rc::Rc;
 use tokio::sync::mpsc;
 use tracing::{error, info};
 use ui::SwitcherWindow;
-
-/// Get the path to the pidfile
-fn get_pidfile_path() -> Result<PathBuf> {
-    // Try to use XDG_RUNTIME_DIR, fall back to ~/.cache
-    let runtime_dir = dirs::runtime_dir()
-        .or_else(dirs::cache_dir)
-        .context("Could not determine runtime directory")?;
-
-    Ok(runtime_dir.join("sway-alttab-gui.pid"))
-}
-
-/// Read the PID from the pidfile if it exists.
-/// Returns Ok(None) if no pidfile exists, Ok(Some(pid)) if valid.
-fn read_pidfile() -> Result<Option<i32>> {
-    let pidfile = get_pidfile_path()?;
-
-    if !pidfile.exists() {
-        return Ok(None);
-    }
-
-    let pid_str = fs::read_to_string(&pidfile).context("Failed to read pidfile")?;
-    let pid: i32 = pid_str.trim().parse().context("Invalid PID in pidfile")?;
-
-    Ok(Some(pid))
-}
-
-/// Check if another instance is already running
-fn check_pidfile() -> Result<()> {
-    let Some(pid) = read_pidfile()? else {
-        return Ok(());
-    };
-
-    if process_exists(pid) {
-        let pidfile = get_pidfile_path()?;
-        anyhow::bail!(
-            "Another instance of sway-alttab-gui is already running (PID: {}). \
-             If this is incorrect, remove the pidfile at: {}",
-            pid,
-            pidfile.display()
-        );
-    }
-
-    // Stale pidfile, remove it
-    info!("Removing stale pidfile (PID {} not found)", pid);
-    let pidfile = get_pidfile_path()?;
-    if let Err(e) = fs::remove_file(&pidfile) {
-        tracing::warn!("Failed to remove stale pidfile: {}", e);
-    }
-
-    Ok(())
-}
-
-/// Check if a process with the given PID exists
-fn process_exists(pid: i32) -> bool {
-    // Check if /proc/<pid> exists (Linux-specific, but this is for Sway which is Linux-only)
-    PathBuf::from(format!("/proc/{}", pid)).exists()
-}
-
-/// Create the pidfile
-fn create_pidfile() -> Result<PidfileGuard> {
-    let pidfile = get_pidfile_path()?;
-    let pid = std::process::id();
-
-    fs::write(&pidfile, pid.to_string()).context("Failed to write pidfile")?;
-
-    info!("Created pidfile at {} with PID {}", pidfile.display(), pid);
-
-    Ok(PidfileGuard { path: pidfile })
-}
-
-/// Guard that removes the pidfile when dropped
-struct PidfileGuard {
-    path: PathBuf,
-}
-
-impl Drop for PidfileGuard {
-    fn drop(&mut self) {
-        if let Err(e) = fs::remove_file(&self.path) {
-            error!("Failed to remove pidfile: {}", e);
-        } else {
-            info!("Removed pidfile at {}", self.path.display());
-        }
-    }
-}
 
 fn main() -> Result<()> {
     // Parse CLI arguments
@@ -135,11 +51,11 @@ fn send_show_signal() -> Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
 
-    let Some(pid) = read_pidfile()? else {
-        let pidfile = get_pidfile_path()?;
+    let pidfile = Pidfile::new()?;
+    let Some(pid) = pidfile.read()? else {
         anyhow::bail!(
             "Daemon is not running (pidfile not found at {})",
-            pidfile.display()
+            pidfile.path().display()
         );
     };
 
@@ -152,11 +68,10 @@ fn run_daemon_mode(config: Config) -> Result<()> {
     info!("Starting sway-alttab-gui daemon with GTK UI");
     info!("Workspace mode: {:?}", config.mode());
 
-    // Check if another instance is already running
-    check_pidfile()?;
-
-    // Create pidfile (will be automatically removed when the guard is dropped)
-    let _pidfile_guard = create_pidfile()?;
+    // Check if another instance is already running and create pidfile
+    let pidfile = Pidfile::new()?;
+    pidfile.check()?;
+    let _pidfile_guard = pidfile.create()?;
 
     // Build WMClass index at startup (before GTK, so it's ready when needed)
     info!("Building WMClass index for icon resolution...");

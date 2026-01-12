@@ -48,7 +48,7 @@ fn main() -> Result<()> {
 
 /// Send SIGUSR1 to the running daemon to trigger the window switcher
 fn send_show_signal() -> Result<()> {
-    use nix::sys::signal::{kill, Signal};
+    use nix::sys::signal::{Signal, kill};
     use nix::unistd::Pid;
 
     let pidfile = Pidfile::new()?;
@@ -96,7 +96,7 @@ fn run_daemon_mode(config: Config) -> Result<()> {
 
     // Create GTK Application
     let app = gtk4::Application::builder()
-        .application_id("com.github.itsjfx.sway-alttab-gui-gui")
+        .application_id("com.github.itsjfx.sway-alttab-gui")
         .build();
 
     let wmclass_index_clone = wmclass_index.clone();
@@ -126,7 +126,14 @@ fn run_daemon_mode(config: Config) -> Result<()> {
 
             // Run daemon in Tokio runtime
             rt.block_on(async move {
-                match run_daemon_async(config_clone, ui_cmd_tx, input_cmd_rx, wmclass_index_for_daemon).await {
+                match run_daemon_async(
+                    config_clone,
+                    ui_cmd_tx,
+                    input_cmd_rx,
+                    wmclass_index_for_daemon,
+                )
+                .await
+                {
                     Ok(_) => {
                         info!("Daemon exited normally");
                     }

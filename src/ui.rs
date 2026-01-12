@@ -16,12 +16,36 @@ const WINDOW_PADDING: i32 = 25;
 const TILE_PADDING: i32 = 10;
 const MAX_TITLE_LENGTH: usize = 20;
 
+/// Check if Alt key is currently held down.
+/// Used to detect race condition where Alt was released before window got focus.
+fn is_alt_held() -> bool {
+    let Some(display) = gtk4::gdk::Display::default() else {
+        warn!("Could not get default display to check modifier state");
+        return true; // Assume held if we can't check (safer default)
+    };
+
+    let Some(seat) = display.default_seat() else {
+        warn!("Could not get default seat to check modifier state");
+        return true;
+    };
+
+    let Some(keyboard) = seat.keyboard() else {
+        warn!("Could not get keyboard device to check modifier state");
+        return true;
+    };
+
+    keyboard
+        .modifier_state()
+        .contains(gtk4::gdk::ModifierType::ALT_MASK)
+}
+
 pub struct SwitcherWindow {
     window: ApplicationWindow,
     container: GtkBox,
     windows: Vec<WindowInfo>,
     current_index: usize,
     tiles: Vec<Widget>,
+    input_tx: InputSender,
 }
 
 /// Sender type for input commands to daemon
@@ -88,7 +112,7 @@ impl SwitcherWindow {
         });
 
         // Detect Alt release
-        let tx_released = input_tx;
+        let tx_released = input_tx.clone();
         key_controller.connect_key_released(move |_controller, keyval, _keycode, _state| {
             debug!("Key released: {:?}", keyval);
 
@@ -120,6 +144,7 @@ impl SwitcherWindow {
             windows: Vec::new(),
             current_index: 0,
             tiles: Vec::new(),
+            input_tx,
         }
     }
 
@@ -169,6 +194,16 @@ impl SwitcherWindow {
         self.window.set_visible(true);
         self.window.present();
         info!("Window presented, is_visible={}", self.window.is_visible());
+
+        // Handle race condition: Alt may have been released before we got keyboard focus.
+        // Schedule a check after a short delay to verify Alt is still held.
+        let tx = self.input_tx.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
+            if !is_alt_held() {
+                info!("Alt released before window acquired focus - auto-selecting");
+                send_input_command(&tx, InputCommand::Select);
+            }
+        });
     }
 
     fn create_window_tile(&self, window: &WindowInfo, icon_resolver: &mut IconResolver) -> Widget {

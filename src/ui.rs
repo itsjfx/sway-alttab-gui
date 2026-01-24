@@ -15,6 +15,7 @@ const ICON_SIZE: i32 = 64;
 const WINDOW_PADDING: i32 = 25;
 const TILE_PADDING: i32 = 10;
 const MAX_TITLE_LENGTH: usize = 20;
+const MAX_TITLE_LINES: usize = 4;
 
 /// Check if Alt key is currently held down.
 /// Used to detect race condition where Alt was released before window got focus.
@@ -210,6 +211,7 @@ impl SwitcherWindow {
         let vbox = GtkBox::new(Orientation::Vertical, 5);
         vbox.set_margin_start(TILE_PADDING);
         vbox.set_margin_end(TILE_PADDING);
+        vbox.set_valign(gtk4::Align::Start);
 
         // Add icon - try app_id first, then window_class, then fallback
         let pixbuf = icon_resolver
@@ -230,10 +232,11 @@ impl SwitcherWindow {
         }
 
         // Add title
-        let title = truncate_string(&window.title, MAX_TITLE_LENGTH);
-        let label = Label::new(Some(&title));
-        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        let label = Label::new(Some(&window.title));
+        label.set_wrap(true);
         label.set_max_width_chars(MAX_TITLE_LENGTH as i32);
+        label.set_lines(MAX_TITLE_LINES as i32);
+        label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         vbox.append(&label);
 
         vbox.upcast()
@@ -288,20 +291,6 @@ fn send_input_command(tx: &InputSender, cmd: InputCommand) {
     }
 }
 
-fn truncate_string(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        s.to_string()
-    } else {
-        format!(
-            "{}...",
-            s.chars()
-                .take(max_chars.saturating_sub(3))
-                .collect::<String>()
-        )
-    }
-}
-
 /// Setup CSS styling for the window switcher
 pub fn setup_css() {
     let provider = gtk4::CssProvider::new();
@@ -319,70 +308,4 @@ pub fn setup_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
     );
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_truncate_string_short() {
-        assert_eq!(truncate_string("hello", 20), "hello");
-    }
-
-    #[test]
-    fn test_truncate_string_exact_length() {
-        let s = "12345678901234567890"; // exactly 20 chars
-        assert_eq!(truncate_string(s, 20), s);
-    }
-
-    #[test]
-    fn test_truncate_string_long() {
-        let s = "this is a very long window title";
-        let result = truncate_string(s, 10);
-        assert_eq!(result, "this is...");
-        assert_eq!(result.chars().count(), 10);
-    }
-
-    #[test]
-    fn test_truncate_string_unicode() {
-        // Unicode characters should count as 1 char each
-        let s = "日本語テストタイトル";
-        let result = truncate_string(s, 5);
-        assert_eq!(result, "日本...");
-        assert_eq!(result.chars().count(), 5);
-    }
-
-    #[test]
-    fn test_truncate_string_empty() {
-        assert_eq!(truncate_string("", 20), "");
-    }
-
-    #[test]
-    fn test_truncate_string_one_char() {
-        assert_eq!(truncate_string("a", 20), "a");
-    }
-
-    #[test]
-    fn test_truncate_string_exactly_max_plus_one() {
-        let s = "123456789012345678901"; // 21 chars
-        let result = truncate_string(s, 20);
-        assert_eq!(result, "12345678901234567...");
-        assert_eq!(result.chars().count(), 20);
-    }
-
-    #[test]
-    fn test_truncate_string_very_short_max() {
-        // Edge case: max is 3, so only ellipsis fits
-        let result = truncate_string("hello", 3);
-        assert_eq!(result, "...");
-    }
-
-    #[test]
-    fn test_truncate_string_max_less_than_3() {
-        // Edge case: max is less than ellipsis length
-        // saturating_sub prevents underflow
-        let result = truncate_string("hello", 2);
-        assert_eq!(result, "...");
-    }
 }

@@ -15,24 +15,27 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 
 <img width="750" height="247" alt="Preview" src="https://github.com/user-attachments/assets/bf782b77-1633-4328-bf72-5d763f3e40ad" />
 
-## Quick Start
+## Installation
 
-### Install
+### Arch Linux
 
 If you're using Arch Linux, you can install from the AUR:
 
 * [sway-alttab-gui-bin](https://aur.archlinux.org/packages/sway-alttab-gui-bin)
 * No DIY build from source package yet (can be added and maintained on request)
 
-For other distros:
+### All distributions
 
 1. Install required runtime dependencies
     1. `gtk4`
     2. `gtk4-layer-shell`
     3. Sway (duh)
-2. Download the binary from GitHub releases or build from source with `cargo build --release`
+2. Then choose one of the following methods to get the binary
+    1. [Download the latest binary from GitHub releases](https://github.com/itsjfx/sway-alttab-gui/releases)
+    2. Build and install from source with `cargo build --git=https://github.com/itsjfx/sway-alttab-gui`
+    3. Or clone the repository yourself, and build the binary with `cargo build --release`
 
-### Configuration
+## Configuration
 
 ```bash
 exec --no-startup-id sway-alttab-gui daemon

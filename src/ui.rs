@@ -14,7 +14,7 @@ use tracing::{debug, info, warn};
 const ICON_SIZE: i32 = 64;
 const WINDOW_PADDING: i32 = 25;
 const TILE_PADDING: i32 = 10;
-const MAX_TITLE_LENGTH: usize = 20;
+const MAX_TITLE_LENGTH: usize = 13;
 const MAX_TITLE_LINES: usize = 4;
 
 /// Check if Alt key is currently held down.
@@ -234,7 +234,12 @@ impl SwitcherWindow {
         // Add title
         let label = Label::new(Some(&window.title));
         label.set_wrap(true);
+        label.set_wrap_mode(gtk4::pango::WrapMode::Char);
         label.set_max_width_chars(MAX_TITLE_LENGTH as i32);
+        // Only request full width if title needs wrapping (avoids padding on short titles)
+        if window.title.chars().count() > MAX_TITLE_LENGTH {
+            label.set_width_chars(MAX_TITLE_LENGTH as i32);
+        }
         label.set_lines(MAX_TITLE_LINES as i32);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         vbox.append(&label);

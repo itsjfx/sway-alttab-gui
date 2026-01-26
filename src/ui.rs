@@ -236,10 +236,9 @@ impl SwitcherWindow {
         label.set_wrap(true);
         label.set_wrap_mode(gtk4::pango::WrapMode::Char);
         label.set_max_width_chars(MAX_TITLE_LENGTH as i32);
-        // Only request full width if title needs wrapping (avoids padding on short titles)
-        if window.title.chars().count() > MAX_TITLE_LENGTH {
-            label.set_width_chars(MAX_TITLE_LENGTH as i32);
-        }
+        // Request width for the title (capped at MAX_TITLE_LENGTH)
+        let title_len = window.title.chars().count().min(MAX_TITLE_LENGTH);
+        label.set_width_chars(title_len as i32);
         label.set_lines(MAX_TITLE_LINES as i32);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
         vbox.append(&label);

@@ -16,27 +16,32 @@ pub struct WindowInfo {
     pub window_class: Option<String>, // WM_CLASS for X11 windows
 }
 
+/// Returns true if the node is an actual window (view), not a container/workspace/output.
+/// Matches both tiled (Con) and floating (FloatingCon) windows; views have a pid, containers don't.
+#[must_use]
+fn is_window(node: &Node) -> bool {
+    matches!(node.node_type, NodeType::Con | NodeType::FloatingCon) && node.pid.is_some()
+}
+
 impl WindowInfo {
     pub fn from_node(node: &Node, workspace: String) -> Option<Self> {
-        // Only include actual windows (views), not containers
-        // Windows have a pid, containers don't
-        if node.node_type == NodeType::Con && node.pid.is_some() {
-            // Extract WM_CLASS from X11/XWayland window properties
-            let window_class = node
-                .window_properties
-                .as_ref()
-                .and_then(|props| props.class.clone());
-
-            Some(WindowInfo {
-                id: node.id,
-                app_id: node.app_id.clone(),
-                title: node.name.clone().unwrap_or_default(),
-                workspace,
-                window_class,
-            })
-        } else {
-            None
+        if !is_window(node) {
+            return None;
         }
+
+        // Extract WM_CLASS from X11/XWayland window properties
+        let window_class = node
+            .window_properties
+            .as_ref()
+            .and_then(|props| props.class.clone());
+
+        Some(WindowInfo {
+            id: node.id,
+            app_id: node.app_id.clone(),
+            title: node.name.clone().unwrap_or_default(),
+            workspace,
+            window_class,
+        })
     }
 }
 
@@ -213,8 +218,7 @@ fn collect_windows<'a>(node: &'a Node, current_workspace: Cow<'a, str>) -> Vec<W
 #[must_use]
 fn find_focused_window(node: &Node) -> Option<i64> {
     // Check if this node is a focused window (not just a focused container)
-    // Windows have a pid, containers don't
-    if node.node_type == NodeType::Con && node.focused && node.pid.is_some() {
+    if is_window(node) && node.focused {
         return Some(node.id);
     }
 

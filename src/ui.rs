@@ -1,7 +1,8 @@
+use crate::config::ReleaseKey;
 use crate::icon_resolver::{IconResolver, WmClassIndex};
 use crate::ipc::InputCommand;
 use crate::window_manager::WindowInfo;
-use gtk4::gdk::Key;
+use gtk4::gdk::{Key, ModifierType};
 use gtk4::prelude::*;
 use gtk4::{
     Application, ApplicationWindow, Box as GtkBox, EventControllerKey, Image, Label, Orientation,
@@ -17,9 +18,9 @@ const TILE_PADDING: i32 = 10;
 const MAX_TITLE_LENGTH: usize = 13;
 const MAX_TITLE_LINES: usize = 4;
 
-/// Check if Alt key is currently held down.
-/// Used to detect race condition where Alt was released before window got focus.
-fn is_alt_held() -> bool {
+/// Check if the configured release modifier is currently held down.
+/// Used to detect race condition where the modifier was released before window got focus.
+fn is_modifier_held(mask: ModifierType) -> bool {
     let Some(display) = gtk4::gdk::Display::default() else {
         warn!("Could not get default display to check modifier state");
         return true; // Assume held if we can't check (safer default)
@@ -35,9 +36,7 @@ fn is_alt_held() -> bool {
         return true;
     };
 
-    keyboard
-        .modifier_state()
-        .contains(gtk4::gdk::ModifierType::ALT_MASK)
+    keyboard.modifier_state().contains(mask)
 }
 
 pub struct SwitcherWindow {
@@ -47,13 +46,14 @@ pub struct SwitcherWindow {
     current_index: usize,
     tiles: Vec<Widget>,
     input_tx: InputSender,
+    release_key: ReleaseKey,
 }
 
 /// Sender type for input commands to daemon
 pub type InputSender = mpsc::UnboundedSender<InputCommand>;
 
 impl SwitcherWindow {
-    pub fn new(app: &Application, input_tx: InputSender) -> Self {
+    pub fn new(app: &Application, input_tx: InputSender, release_key: ReleaseKey) -> Self {
         let window = ApplicationWindow::builder()
             .application(app)
             .title("Window Switcher")
@@ -112,17 +112,15 @@ impl SwitcherWindow {
             }
         });
 
-        // Detect Alt release
+        // Detect release of the configured modifier
         let tx_released = input_tx.clone();
+        let release_keys = release_key.keys();
         key_controller.connect_key_released(move |_controller, keyval, _keycode, _state| {
             debug!("Key released: {:?}", keyval);
 
-            match keyval {
-                Key::Alt_L | Key::Alt_R => {
-                    debug!("Alt released, sending select");
-                    send_input_command(&tx_released, InputCommand::Select);
-                }
-                _ => {}
+            if release_keys.contains(&keyval) {
+                debug!("Release key {:?} released, sending select", keyval);
+                send_input_command(&tx_released, InputCommand::Select);
             }
         });
 
@@ -146,6 +144,7 @@ impl SwitcherWindow {
             current_index: 0,
             tiles: Vec::new(),
             input_tx,
+            release_key,
         }
     }
 
@@ -196,12 +195,13 @@ impl SwitcherWindow {
         self.window.present();
         info!("Window presented, is_visible={}", self.window.is_visible());
 
-        // Handle race condition: Alt may have been released before we got keyboard focus.
-        // Schedule a check after a short delay to verify Alt is still held.
+        // Handle race condition: the modifier may have been released before we got keyboard focus.
+        // Schedule a check after a short delay to verify it is still held.
         let tx = self.input_tx.clone();
+        let mask = self.release_key.mask();
         glib::timeout_add_local_once(std::time::Duration::from_millis(50), move || {
-            if !is_alt_held() {
-                info!("Alt released before window acquired focus - auto-selecting");
+            if !is_modifier_held(mask) {
+                info!("Release key released before window acquired focus - auto-selecting");
                 send_input_command(&tx, InputCommand::Select);
             }
         });

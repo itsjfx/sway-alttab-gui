@@ -8,6 +8,7 @@ If you used [sagb/alttab](https://github.com/sagb/alttab) on X11, then this is f
 
 * GTK4 visual window switcher with icons
 * MRU (Most Recently Used) window ordering
+* Customisable Alt key, use Ctrl or Super/Win instead
 * Alt+Tab to cycle forward, Shift+Tab to cycle backward
 * Alt release to select window
 * Can display windows from current workspace or all workspaces
@@ -37,6 +38,8 @@ If you're using Arch Linux, you can install from the AUR:
 
 ## Configuration
 
+Add to your Sway configuration:
+
 ```bash
 exec --no-startup-id sway-alttab-gui daemon
 bindsym Mod1+Tab exec sway-alttab-gui show
@@ -47,3 +50,13 @@ For first time usage: reload your Sway configuration and run the daemon manually
 `sway-alttab-gui daemon` can optionally take:
 * `--mode all`: to list windows across all workspaces
 * `--verbose`: to enable verbose logging
+* `--release-key <KEY>`: which modifier's release closes the switcher (default `alt`). Accepts `alt`/`mod1`, `super`/`mod4`/`win`, `ctrl`/`control`
+
+`--release-key` will match the modifier key name in Sway, meaning to bind to Super/Win, you can do:
+
+```bash
+set $mod Mod4
+exec --no-startup-id sway-alttab-gui daemon --release-key $mod
+bindsym $mod+Tab exec sway-alttab-gui show
+```
+

@@ -109,7 +109,11 @@ fn run_daemon_mode(config: Config) -> Result<()> {
         let (input_cmd_tx, input_cmd_rx) = mpsc::unbounded_channel();
 
         // Create SwitcherWindow with input channel
-        let switcher = Rc::new(RefCell::new(SwitcherWindow::new(app, input_cmd_tx)));
+        let switcher = Rc::new(RefCell::new(SwitcherWindow::new(
+            app,
+            input_cmd_tx,
+            config.release_key(),
+        )));
 
         // Pre-realize window to avoid slow first show
         switcher.borrow().warm_up();

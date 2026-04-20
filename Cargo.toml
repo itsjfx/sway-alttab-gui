@@ -1,6 +1,6 @@
 [package]
 name = "sway-alttab-gui"
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 description = "Windows-style Alt+Tab window switcher for Sway"
 license = "GPL-3.0-or-later"

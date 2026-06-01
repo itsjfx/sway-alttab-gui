@@ -17,16 +17,28 @@ const DESKTOP_FILE_CACHE_SIZE: usize = 256;
 /// Cached XDG application directories plus flatpak locations.
 /// Computed once at first access.
 static APPLICATION_DIRS: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
-    [
+    let mut directories = Vec::new();
+
+    if let Some(xdg_data_dirs) = std::env::var_os("XDG_DATA_DIRS") {
+        for path in std::env::split_paths(&xdg_data_dirs) {
+            directories.push(path.join("applications"))
+        }
+    }
+
+    let fallbacks = [
         dirs::data_local_dir().map(|d| d.join("applications")),
         Some(PathBuf::from("/usr/share/applications")),
         Some(PathBuf::from("/usr/local/share/applications")),
         Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
         dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    ];
+    for path in fallbacks.into_iter().flatten() {
+        if !directories.contains(&path) {
+            directories.push(path);
+        }
+    }
+
+    directories.into_iter().filter(|d| d.exists()).collect()
 });
 
 /// A pre-built index mapping StartupWMClass values to desktop file paths.

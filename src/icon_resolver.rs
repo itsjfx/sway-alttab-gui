@@ -1,8 +1,8 @@
 use freedesktop_desktop_entry::DesktopEntry;
-use gtk4::gdk_pixbuf::Pixbuf;
-use gtk4::gio::prelude::FileExt;
 use gtk4::IconLookupFlags;
 use gtk4::IconTheme;
+use gtk4::gdk_pixbuf::Pixbuf;
+use gtk4::gio::prelude::FileExt;
 use lru::LruCache;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -17,17 +17,53 @@ const DESKTOP_FILE_CACHE_SIZE: usize = 256;
 /// Cached XDG application directories plus flatpak locations.
 /// Computed once at first access.
 static APPLICATION_DIRS: LazyLock<Vec<PathBuf>> = LazyLock::new(|| {
-    [
-        dirs::data_local_dir().map(|d| d.join("applications")),
-        Some(PathBuf::from("/usr/share/applications")),
-        Some(PathBuf::from("/usr/local/share/applications")),
-        Some(PathBuf::from("/var/lib/flatpak/exports/share/applications")),
-        dirs::home_dir().map(|d| d.join(".local/share/flatpak/exports/share/applications")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    application_dirs(dirs::data_local_dir(), std::env::var_os("XDG_DATA_DIRS"))
+        .into_iter()
+        .filter(|d| d.exists())
+        .collect()
 });
+
+/// Build the ordered list of application directories to search.
+///
+/// Per the XDG base directory spec, the user's data dir (XDG_DATA_HOME)
+/// takes precedence over the system-wide XDG_DATA_DIRS search path.
+/// Well-known fallbacks cover systems where XDG_DATA_DIRS is unset,
+/// plus flatpak export locations. Duplicates are removed, keeping the
+/// first (highest-precedence) occurrence.
+fn application_dirs(
+    data_local_dir: Option<PathBuf>,
+    xdg_data_dirs: Option<std::ffi::OsString>,
+) -> Vec<PathBuf> {
+    let xdg = xdg_data_dirs
+        .iter()
+        .flat_map(std::env::split_paths)
+        .map(|p| p.join("applications"));
+
+    // Flatpak's user installation lives under XDG_DATA_HOME, not a fixed
+    // ~/.local/share path.
+    let candidates = data_local_dir
+        .iter()
+        .map(|d| d.join("applications"))
+        .chain(xdg)
+        .chain([
+            PathBuf::from("/usr/share/applications"),
+            PathBuf::from("/usr/local/share/applications"),
+            PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+        ])
+        .chain(
+            data_local_dir
+                .iter()
+                .map(|d| d.join("flatpak/exports/share/applications")),
+        );
+
+    let mut directories = Vec::new();
+    for path in candidates {
+        if !directories.contains(&path) {
+            directories.push(path);
+        }
+    }
+    directories
+}
 
 /// A pre-built index mapping StartupWMClass values to desktop file paths.
 /// This allows resolving icons for apps like Signal where app_id ("signal")
@@ -305,6 +341,64 @@ impl IconResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_application_dirs_xdg_data_dirs_are_searched() {
+        let dirs = application_dirs(
+            None,
+            Some("/run/current-system/sw/share:/nix/profile/share".into()),
+        );
+
+        // Each XDG_DATA_DIRS entry gets "applications" appended, in order
+        assert_eq!(
+            dirs[0],
+            PathBuf::from("/run/current-system/sw/share/applications")
+        );
+        assert_eq!(dirs[1], PathBuf::from("/nix/profile/share/applications"));
+    }
+
+    #[test]
+    fn test_application_dirs_user_dir_precedes_xdg_data_dirs() {
+        // Per the XDG spec, XDG_DATA_HOME takes precedence over XDG_DATA_DIRS.
+        // This matters because the WMClass index is first-match-wins.
+        let dirs = application_dirs(
+            Some(PathBuf::from("/home/user/.local/share")),
+            Some("/usr/share".into()),
+        );
+
+        assert_eq!(
+            dirs[0],
+            PathBuf::from("/home/user/.local/share/applications")
+        );
+        assert_eq!(dirs[1], PathBuf::from("/usr/share/applications"));
+    }
+
+    #[test]
+    fn test_application_dirs_deduplicates_keeping_first() {
+        let dirs = application_dirs(
+            Some(PathBuf::from("/home/user/.local/share")),
+            Some("/usr/share:/usr/local/share:/usr/share".into()),
+        );
+
+        let usr_share = PathBuf::from("/usr/share/applications");
+        assert_eq!(dirs.iter().filter(|d| **d == usr_share).count(), 1);
+    }
+
+    #[test]
+    fn test_application_dirs_fallbacks_when_xdg_data_dirs_unset() {
+        let dirs = application_dirs(Some(PathBuf::from("/home/user/.local/share")), None);
+
+        assert_eq!(
+            dirs,
+            vec![
+                PathBuf::from("/home/user/.local/share/applications"),
+                PathBuf::from("/usr/share/applications"),
+                PathBuf::from("/usr/local/share/applications"),
+                PathBuf::from("/var/lib/flatpak/exports/share/applications"),
+                PathBuf::from("/home/user/.local/share/flatpak/exports/share/applications"),
+            ]
+        );
+    }
 
     #[test]
     fn test_extract_wmclass_from_content() {
